@@ -1,0 +1,13 @@
+---
+# SOLVE — Module 1: Prerequisites and Migration Workflow
+# Replace with your solve tasks
+
+- name: Module 1 Solve
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+
+    - name: Placeholder — replace with your solve tasks
+      ansible.builtin.debug:
+        msg: "Module 1 solve placeholder"

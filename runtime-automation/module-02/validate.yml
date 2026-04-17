@@ -1,0 +1,14 @@
+---
+# VALIDATE — Module 2: Configure Seeding and Cutover Workflow
+# Replace with your validation tasks
+
+- name: Module 2 Validation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+
+    - name: Placeholder validation — replace with your checks
+      validation_check:
+        check: true
+        pass_msg: "Module 2 placeholder — replace with your validation"

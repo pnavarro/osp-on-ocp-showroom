@@ -1,0 +1,14 @@
+---
+# VALIDATE — Module 1: Prerequisites and Migration Workflow
+# Replace with your validation tasks
+
+- name: Module 1 Validation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+
+    - name: Placeholder validation — replace with your checks
+      validation_check:
+        check: true
+        pass_msg: "Module 1 placeholder — replace with your validation"
