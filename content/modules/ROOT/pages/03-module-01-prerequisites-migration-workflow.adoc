@@ -243,13 +243,7 @@ Click on **Hosts** to view the individual host configurations:
 ==== Conversion Host
 
 * **Name**: conversion_host
-* **Variables**:
-[source,bash,subs="attributes"]
-----
-ansible_host: {rhoso_conversion_host_ip}
-ansible_ssh_user: cloud-user
-----
-
+* **Variables**: ansible_host variable set to {rhoso_conversion_host_ip} and ansible_ssh_user variable set to cloud-user
 **Purpose**: This host definition allows AAP to connect to the Conversion Host VM in OpenStack to execute migration tasks.
 
 ==== Migrator Host

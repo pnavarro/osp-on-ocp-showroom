@@ -41,7 +41,7 @@ You will have access to:
 
 * OpenShift Console: {openshift_console_url}
 * Ansible Automation Platform: {aap_controller_web_url}
-* Bastion SSH: {bastion_ssh_command}
+* A tab already connected to the bastion host
 
 NOTE: All environment details and credentials are available in the lab interface.
 
