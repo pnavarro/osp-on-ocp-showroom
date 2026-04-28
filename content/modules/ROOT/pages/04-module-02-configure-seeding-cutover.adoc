@@ -920,55 +920,6 @@ sleep 10
 ./govc vm.power -on rhel4cbt-{guid}
 ----
 
-=== AAP job template issues
-
-**Issue**: Seeding job fails with "authentication error" to vCenter
-
-**Solution**:
-
-1. Verify vCenter credentials in the extra variables
-2. Check that `vcenter_username` and `vcenter_password` are correctly populated
-3. Test vCenter connectivity from the bastion:
-+
-[source,bash,subs="attributes"]
-----
-curl -k https://{vcenter_console}/ui/
-----
-4. Ensure credentials match your UserInfo variables
-
-**Issue**: Job fails with "Conversion Host unreachable"
-
-**Solution**:
-
-1. Verify Conversion Host is running:
-+
-[source,bash, role=execute]
-----
-openstack server list | grep rhel-ch
-----
-2. Test SSH connectivity to Conversion Host:
-+
-[source,bash,subs="attributes", role=execute]
-----
-ssh -i /home/lab-user/.ssh/{guid}key.pem cloud-user@{rhoso_conversion_host_ip} "echo Connected"
-----
-3. Check that `Bastion key` credential in AAP has correct SSH private key
-4. Verify inventory variable `ansible_host` points to correct Conversion Host IP
-
-**Issue**: Seeding job completes but no volume created in OpenStack
-
-**Solution**:
-
-1. Check job output for OpenStack authentication errors
-2. Verify `dst_cloud` credentials in extra variables are correct
-3. Test OpenStack connectivity from bastion:
-+
-[source,bash, role=execute]
-----
-openstack server list
-----
-4. Check AAP job output for specific error messages about volume creation
-
 === Workflow execution issues
 
 **Issue**: Workflow doesn't pause at approval node
@@ -1016,7 +967,7 @@ openstack server list
 
 **Conversion Host logs**:
 
-For detailed nbdkit and data transfer logs:
+From the bastion tab, for detailed nbdkit and data transfer logs:
 
 [source,bash,subs="attributes", role=execute]
 ----
@@ -1025,15 +976,6 @@ sudo -i
 ls -la /tmp/osm-nbdkit-rhel4cbt-{guid}-*.log
 less /tmp/osm-nbdkit-rhel4cbt-{guid}-*.log
 ----
-
-**vCenter task logs**:
-
-For VMware-side issues:
-
-1. Access vCenter UI: {vcenter_console}
-2. Navigate to: Menu → Tasks & Events
-3. Filter by VM name: `rhel4cbt-{guid}`
-4. Review recent tasks for errors
 
 == Learning outcomes checkpoint
 

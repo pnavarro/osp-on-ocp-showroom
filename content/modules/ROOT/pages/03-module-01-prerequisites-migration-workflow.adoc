@@ -188,7 +188,7 @@ Before proceeding to Section 2, verify you can complete these tasks:
 
 **Infrastructure verification**:
 
-* [ ] SSH to bastion host: `ssh {bastion_ssh_user_name}@{bastion_public_hostname} -p {bastion_ssh_port}`
+* [ ] In the bastion tab, you are directly connected to the bastion host
 * [ ] Execute OpenStack commands: `openstack server list`
 * [ ] Identify the Conversion Host by name: `rhel-ch`
 * [ ] SSH to Conversion Host: `ssh -i /home/lab-user/.ssh/{guid}key.pem cloud-user@{rhoso_conversion_host_ip}`
@@ -244,7 +244,7 @@ Click on **Hosts** to view the individual host configurations:
 
 * **Name**: conversion_host
 * **Variables**:
-[source,yaml,subs="attributes"]
+[source,bash,subs="attributes"]
 ----
 ansible_host: {rhoso_conversion_host_ip}
 ansible_ssh_user: cloud-user
@@ -274,7 +274,7 @@ Look for **VMware Migration toolkit execution environment**.
 
 **What to observe**:
 
-* **Image**: `default-route-openshift-image-registry.apps.cluster-{guid}.dynamic.redhatworkshops.io/aap/rhospvmt-ee:latest`
+* **Image**: `aap-hub-aap.apps.cluster-{guid}.dynamic.redhatworkshops.io/rhospvmt-ee:latest`
 
 **Purpose**: This is a specialized container image that includes:
 
@@ -294,7 +294,7 @@ Select the **vmware migration toolkit project**.
 
 * **Source Control Type**: Git
 * **Source Control URL**: `https://github.com/os-migrate/vmware-migration-kit`
-* **Source Control Branch/Tag/Commit**: `main`
+* **Source Control Branch/Tag/Commit**: `stable`
 
 Click the cloud icon (sync button) to verify the project can synchronize successfully.
 
@@ -525,43 +525,11 @@ As we are using a virtualized environment, the migration job template will take 
 
 While exploring the pre-deployed infrastructure, you might encounter these common issues:
 
-**Issue**: Cannot SSH to bastion - "Connection refused" or "Permission denied"
-
-**Solution**:
-
-. Verify you're using the correct port: `{bastion_ssh_port}`
-. Double-check the username: `{bastion_ssh_user_name}`
-. Ensure your SSH command includes the `-p` flag: `ssh {bastion_ssh_user_name}@{bastion_public_hostname} -p {bastion_ssh_port}`
-. If using password authentication fails, copy your public SSH key to the bastion as described in the workshop details
-
-**Issue**: `openstack server list` shows no servers or returns authentication error
-
-**Solution**:
-
-. Verify you've set the OpenStack alias correctly:
-+
-[source,bash, role=execute]
-----
-alias openstack="oc exec -t openstackclient -- openstack"
-----
-. Check that you're in the correct OpenShift project:
-+
-[source,bash, role=execute]
-----
-oc project openstack
-----
-. Verify the openstackclient pod is running:
-+
-[source,bash, role=execute]
-----
-oc get pods -n openstack | grep openstackclient
-----
-
 **Issue**: Cannot access AAP console - browser shows "This site can't be reached"
 
 **Solution**:
 
-. Verify the AAP URL is correct: {aap_controller_web_url}
+. Verify the AAP URL is correct: {aap_controller_web_url} and you are logged in with the credentials: {aap_controller_admin_user} and {aap_controller_admin_password}
 . Check for typos in the URL (common mistake: http vs https)
 . If you see a certificate warning, this is expected for self-signed certificates - click "Advanced" and proceed anyway
 . Try accessing from a different browser or incognito window to rule out cache issues
@@ -598,28 +566,6 @@ chmod 600 /home/lab-user/.ssh/{guid}key.pem
 [source,bash,subs="attributes", role=execute]
 ----
 ping -c 3 {rhoso_conversion_host_ip}
-----
-
-**Issue**: AAP credentials page doesn't show the "Bastion key" credential
-
-**Solution**:
-
-. Verify you're logged in with admin privileges: Check the username in the top-right corner shows `{aap_controller_admin_user}`
-. Navigate to **Automation Execution** → **Infrastructure** → **Credentials**
-. Use the search box to filter by "Bastion" or "key"
-. If still not found, check the **Organization** filter - ensure it's set to "Default" or "All"
-
-**Finding migration logs**:
-
-If you need to troubleshoot a migration (in Module 2), logs are available in two locations:
-
-1. **AAP job output** - Navigate to **Automation Execution** → **Jobs**, click on a completed job to view the full Ansible output
-2. **Conversion Host logs** - SSH to the Conversion Host ({rhoso_conversion_host_ip}) and check:
-+
-[source,bash, role=execute]
-----
-sudo -i
-ls -la /tmp/osm-nbdkit-*.log
 ----
 
 == Learning outcomes checkpoint

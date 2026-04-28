@@ -27,8 +27,7 @@ Participants have access to:
 
 * **OpenShift Console**: {openshift_console_url} (provided during workshop)
 * **Ansible Automation Platform Console**: {aap_controller_web_url} (provided during workshop)
-* **Bastion host SSH access**: {bastion_ssh_command} (provided during workshop)
-* **VMware vCenter**: {vcenter_console} (read-only access for verification)
+* **Bastion host SSH access**: On a tab in the lab interface
 
 === Network requirements
 
@@ -43,95 +42,10 @@ Participants have access to:
 
 All infrastructure components are pre-deployed for this workshop. Participants should verify access:
 
-* [ ] **OpenShift Console access confirmed** - Test login with credentials: {openshift_cluster_admin_username}
-* [ ] **Ansible Automation Platform access confirmed** - Test login with credentials: {aap_controller_admin_user}
-* [ ] **Bastion SSH access confirmed** - Test SSH connection to {bastion_public_hostname}
+* [ ] **OpenShift Console access confirmed** - Test login with credentials: {openshift_cluster_admin_username} and {openshift_cluster_admin_password} from the lab interface
+* [ ] **Ansible Automation Platform access confirmed** - Test login with credentials: {aap_controller_admin_user} and {aap_controller_admin_password} from the lab interface
+* [ ] **Bastion SSH access confirmed** - You can access to the bastion lab interface
 * [ ] **Network connectivity verified** - Confirm access to all required URLs from your workstation
-
-=== Setup validation
-
-Participants should verify environment access with these steps:
-
-**Verify OpenStack CLI access**:
-In the bastion tab, run the following commands:
-[source,bash]
-----
-# Once logged into bastion
-oc project openstack
-alias openstack="oc exec -t openstackclient -- openstack"
-openstack server list
-----
-
-**Verify AAP project synchronization**:
-Access {aap_controller_web_url}[AAP Console^] and navigate to:
-
-* Automation Execution → Projects
-* Locate "vmware migration toolkit project"
-* Verify status shows "Successful" with green checkmark
-
-== Troubleshooting guide
-
-=== Common setup issues
-
-**Problem**: "Permission denied" when attempting SSH to bastion
-
-**Solution**:
-
-. Verify you're using the correct port: `{bastion_ssh_port}`
-. Confirm username is: `{bastion_ssh_user_name}`
-. Check SSH command format: `ssh {bastion_ssh_user_name}@{bastion_public_hostname} -p {bastion_ssh_port}`
-. If still failing, try adding `-v` flag for verbose output to diagnose connection issues
-
-**Problem**: "Error: You must be logged in to the server (Unauthorized)" when running `oc` commands
-
-**Solution**:
-
-. Login to OpenShift from the bastion:
-+
-[source,bash,subs="attributes"]
-----
-oc login -u {openshift_cluster_admin_username} -p {openshift_cluster_admin_password} {openshift_api_url}
-----
-. Verify login was successful:
-+
-[source,bash]
-----
-oc whoami
-oc project
-----
-
-**Problem**: "Cannot connect to AAP web interface" or browser shows certificate warning
-
-**Solution**:
-
-. Verify URL is correct: {aap_controller_web_url}
-. Accept browser security exception for self-signed certificate if prompted
-. Clear browser cache and cookies, then retry
-. Try accessing from an incognito/private browser window
-
-**Problem**: "openstack server list" returns empty or shows authentication error
-
-**Solution**:
-
-. Verify you're in the correct project:
-+
-[source,bash]
-----
-oc project openstack
-----
-. Confirm the openstackclient pod is running:
-+
-[source,bash]
-----
-oc get pods -n openstack | grep openstackclient
-----
-. If pod is not ready, wait 1-2 minutes and retry
-. Re-create the alias:
-+
-[source,bash]
-----
-alias openstack="oc exec -t openstackclient -- openstack"
-----
 
 === During workshop support
 
@@ -192,7 +106,7 @@ All architecture diagrams and reference materials are included inline within the
 
 Migration playbooks are available in the pre-configured AAP project repository:
 
-* link:https://github.com/pnavarro/vmware-migration-kit[VMware Migration Toolkit GitHub Repository^]
+* link:https://github.com/os-migrate/vmware-migration-kit[VMware Migration Toolkit GitHub Repository^]
 
 == Authors and contributors
 
