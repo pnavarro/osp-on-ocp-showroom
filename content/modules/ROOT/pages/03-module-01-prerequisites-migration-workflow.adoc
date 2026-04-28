@@ -330,7 +330,26 @@ The migration workflow requires several configuration variables that define:
 
 Before reviewing the job template, let's understand the key variables by examining a reference configuration file.
 
-From the bastion, view the sample configuration:
+=== Review the job template configuration
+
+Navigate to: **Automation Execution** → **Templates**
+
+You should see a job template named **HAProxy VM Migration** (or similar).
+
+Click on the template name to view its configuration.
+
+**What to observe**:
+
+* **Job Type**: Run
+* **Inventory**: Conversion Host Inventory
+* **Project**: vmware migration toolkit project
+* **Playbook**: `playbooks/migration.yml`
+* **Execution Environment**: VMware Migration toolkit execution environment
+* **Credentials**: Bastion key
+
+Scroll down to the **Extra Variables** section. You'll see the migration configuration variables similar to what you reviewed above, but with actual values populated from your lab environment.
+
+This is the configuration file that is used to launch the migration job template.
 
 [source,bash,subs="attributes"]
 ----
@@ -391,25 +410,6 @@ dst_cloud:
 * **dst_cloud**: OpenStack authentication details (auth_url, credentials, project)
 
 **For ACME Corp**: These variables make the migration workflow highly configurable. You can easily adapt the same playbook for different VM sets, networks, or target projects without modifying the underlying automation code.
-
-=== Review the job template configuration
-
-Navigate to: **Automation Execution** → **Templates**
-
-You should see a job template named **HAProxy VM Migration** (or similar).
-
-Click on the template name to view its configuration.
-
-**What to observe**:
-
-* **Job Type**: Run
-* **Inventory**: Conversion Host Inventory
-* **Project**: vmware migration toolkit project
-* **Playbook**: `playbooks/migration.yml`
-* **Execution Environment**: VMware Migration toolkit execution environment
-* **Credentials**: Bastion key
-
-Scroll down to the **Extra Variables** section. You'll see the migration configuration variables similar to what you reviewed above, but with actual values populated from your lab environment.
 
 **Purpose**: This job template ties together everything you've explored:
 
