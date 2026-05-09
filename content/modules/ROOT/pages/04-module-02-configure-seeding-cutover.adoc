@@ -770,7 +770,7 @@ Attach the floating IP to the migrated VM (replace `<FLOATING_IP>` with the IP f
 
 [source,bash,subs="attributes"]
 ----
-openstack server add floating ip rhel4cbt-{guid} <FLOATING_IP>
+openstack server add floating ip rhel4cbt_{guid} <FLOATING_IP>
 ----
 
 ==== Access the migrated VM via SSH
@@ -823,13 +823,13 @@ Clean up the test resources to prepare for future labs.
 
 === Hands-on exercise: Remove migrated resources
 
-==== Delete the VM and volumes in OpenStack
+==== Delete the VM and volumes in OpenStack (optional)
 
 From the bastion, remove the migrated VM:
 
 [source,bash,subs="attributes", role=execute]
 ----
-openstack server delete rhel4cbt-{guid}
+openstack server delete rhel4cbt_{guid}
 openstack volume delete rhel4cbt-{guid}-2000
 openstack port delete rhel4cbt-{guid}-NIC-0-VLAN-private
 ----
@@ -851,7 +851,7 @@ Confirm resources are removed:
 
 [source,bash,subs="attributes", role=execute]
 ----
-openstack server list | grep rhel4cbt-{guid}
+openstack server list | grep rhel4cbt_{guid}
 ./govc vm.info rhel4cbt-{guid} 2>&1
 ----
 
