@@ -354,6 +354,7 @@ This is the configuration file that is used to launch the migration job template
 [source,bash,subs="attributes"]
 ----
 os_migrate_tear_down: false
+import_workloads_vmware_insecure: true
 runner_from_aee: true
 os_migrate_vmw_data_dir: /tmp/os-migrate
 copy_openstack_credentials_to_conv_host: false
