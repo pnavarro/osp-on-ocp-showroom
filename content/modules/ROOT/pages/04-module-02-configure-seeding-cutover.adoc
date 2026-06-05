@@ -277,6 +277,8 @@ Generate the seeding job variables file:
 cat << EOF > /home/lab-user/os-migrate-env/os_migrate_for_aap_seeding.yaml
 os_migrate_tear_down: false
 import_workloads_vmware_insecure: true
+import_workloads_openstack_insecure: true
+openstack_insecure: true
 runner_from_aee: true
 os_migrate_vmw_data_dir: /tmp/os-migrate
 copy_openstack_credentials_to_conv_host: false
@@ -324,6 +326,7 @@ dst_cloud:
   region_name: regionOne
   interface: public
   insecure: true
+  openstack_insecure: true
   identity_api_version: 3
 EOF
 ----
