@@ -1,0 +1,67 @@
+# Enable the Orchestration Service - Heat
+
+. Patch the openstack control plane
++
+In the bastion, patch the openstack control plane CR:
++
+[source,bash,role=execute]
+----
+oc patch openstackcontrolplane openstack-control-plane --type=merge --patch '
+spec:
+  heat:
+    enabled: true
+    apiOverride:
+      route: {}
+    template:
+      databaseInstance: openstack
+      databaseAccount: heat
+      secret: osp-secret
+      memcachedInstance: memcached
+'
+----
+
+. Ensure that the statuses of all the CRs are `Setup complete`:
++
+[source,bash,role=execute]
+----
+oc get Heat,HeatAPI,HeatEngine,HeatCFNAPI
+----
+
+.Sample Output
+----
+NAME                           STATUS   MESSAGE
+heat.heat.openstack.org/heat   True     Setup complete
+
+NAME                                  STATUS   MESSAGE
+heatapi.heat.openstack.org/heat-api   True     Setup complete
+
+NAME                                        STATUS   MESSAGE
+heatengine.heat.openstack.org/heat-engine   True     Setup complete
+
+NAME                                        STATUS   MESSAGE
+heatcfnapi.heat.openstack.org/heat-cfnapi   True     Setup complete
+----
+
+. Check that the Orchestration services is registered in the Keystone service:
++
+[source,bash,role=execute]
+----
+oc exec -it openstackclient -- openstack service list -c Name -c Type
+----
+
+.Sample Output
+----
++------------+----------------+
+| Name       | Type           |
++------------+----------------+
+| heat       | orchestration  |
+| heat-cfn   | cloudformation |
+| placement  | placement      |
+| glance     | image          |
+| ceilometer | Ceilometer     |
+| neutron    | network        |
+| nova       | compute        |
+| cinderv3   | volumev3       |
+| keystone   | identity       |
++------------+----------------+
+----

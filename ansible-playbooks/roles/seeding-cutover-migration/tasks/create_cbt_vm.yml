@@ -1,0 +1,114 @@
+---
+# Create a VM in VMware with CBT enabled and cloud-init guestinfo (per seeding-vm-in-maintenance-windows.adoc).
+# Uses community.vmware (pyvmomi) and govc for VM rename. Run on bastion.
+# Requires vcenter_hostname, vcenter_username, vcenter_password in inventory.
+
+- name: Ensure PyVmomi is installed for community.vmware (CBT VM creation)
+  ansible.builtin.pip:
+    name: pyvmomi
+    state: present
+  delegate_to: localhost
+  become: false
+
+- name: Check if govc is already installed
+  ansible.builtin.stat:
+    path: "{{ cbt_vm_govc_bin }}"
+  register: cbt_vm_govc_stat
+  delegate_to: localhost
+
+- name: Download govc for VMware VM rename
+  ansible.builtin.get_url:
+    url: https://github.com/vmware/govmomi/releases/latest/download/govc_Linux_x86_64.tar.gz
+    dest: /tmp/govc.tar.gz
+    mode: "0644"
+  when: not cbt_vm_govc_stat.stat.exists
+  delegate_to: localhost
+
+- name: Install govc binary
+  ansible.builtin.unarchive:
+    src: /tmp/govc.tar.gz
+    dest: "{{ lookup('env', 'HOME') }}"
+    remote_src: true
+    creates: "{{ cbt_vm_govc_bin }}"
+  when: not cbt_vm_govc_stat.stat.exists
+  delegate_to: localhost
+
+- name: Set effective CBT VM folder (full path or fallback)
+  ansible.builtin.set_fact:
+    cbt_vm_folder_effective: "{{ (((cbt_vm_folder_path | default('')) | trim | length) > 0) | ternary((cbt_vm_folder_path | trim), cbt_vm_folder) }}"
+
+- name: Check if CBT VM already exists
+  community.vmware.vmware_guest_info:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    validate_certs: false
+    datacenter: "{{ cbt_vm_datacenter }}"
+    folder: "{{ cbt_vm_folder_effective }}"
+    name: "{{ seeding_cutover_vms_list[0] }}"
+  register: cbt_vm_info
+  ignore_errors: true
+  delegate_to: localhost
+
+- name: Set cloud-init userdata and metadata (base64) for CBT VM
+  ansible.builtin.set_fact:
+    cbt_vm_userdata_b64: "{{ cbt_vm_cloud_init_userdata | b64encode }}"
+    cbt_vm_metadata_b64: "{{ cbt_vm_cloud_init_metadata | b64encode }}"
+
+# Rename pre-deployed source VM to the CBT migration target name (same as govc vm.change -name)
+- name: Rename CBT source VM for migration
+  ansible.builtin.command:
+    argv:
+      - "{{ cbt_vm_govc_bin }}"
+      - vm.change
+      - -vm={{ cbt_vm_template }}
+      - -name={{ seeding_cutover_vms_list[0] }}
+  environment:
+    GOVC_URL: "{{ cbt_vm_govc_url }}"
+    GOVC_USERNAME: "{{ vcenter_username }}"
+    GOVC_PASSWORD: "{{ vcenter_password }}"
+    GOVC_INSECURE: "true"
+  when: cbt_vm_info.failed | default(false) or (cbt_vm_info.instance | default({}) | length == 0)
+  delegate_to: localhost
+  changed_when: true
+
+- name: Enable CBT and set cloud-init guestinfo on CBT VM
+  community.vmware.vmware_guest:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    validate_certs: false
+    datacenter: "{{ cbt_vm_datacenter }}"
+    folder: "{{ cbt_vm_folder_effective }}"
+    name: "{{ seeding_cutover_vms_list[0] }}"
+    state: present
+    advanced_settings:
+      - key: ctkEnabled
+        value: "TRUE"
+      - key: scsi0:0.ctkEnabled
+        value: "TRUE"
+      - key: guestinfo.userdata
+        value: "{{ cbt_vm_userdata_b64 }}"
+      - key: guestinfo.userdata.encoding
+        value: "base64"
+      - key: guestinfo.metadata
+        value: "{{ cbt_vm_metadata_b64 }}"
+      - key: guestinfo.metadata.encoding
+        value: "base64"
+  delegate_to: localhost
+
+- name: Power on CBT VM
+  community.vmware.vmware_guest:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    validate_certs: false
+    datacenter: "{{ cbt_vm_datacenter }}"
+    folder: "{{ cbt_vm_folder_effective }}"
+    name: "{{ seeding_cutover_vms_list[0] }}"
+    state: poweredon
+  delegate_to: localhost
+
+- name: Display CBT VM creation result
+  ansible.builtin.debug:
+    msg: "CBT VM '{{ seeding_cutover_vms_list[0] }}' created and powered on in folder {{ cbt_vm_folder_effective }} (root password: redhat)."

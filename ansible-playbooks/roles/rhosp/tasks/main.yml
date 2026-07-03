@@ -1,0 +1,633 @@
+---
+# RHOSP 17.1 Installation Role
+# This role automates the installation and configuration of RHOSP 17.1 standalone controller
+# and compute nodes as described in install-rhosp-17.1.adoc
+
+- name: Copy SSH keys to allinone host
+  tags: [ssh_keys]
+  ansible.builtin.copy:
+    src: "{{ ansible_env.HOME }}/.ssh/{{ guid }}key.{{ item }}"
+    dest: "/home/cloud-user/.ssh/{{ guid }}key.{{ item }}"
+    mode: '0600'
+  loop:
+    - pem
+    - pub
+  delegate_to: allinone
+  become_user: cloud-user
+
+- name: Configure hostname on standalone
+  tags: [network, standalone]
+  ansible.builtin.hostname:
+    name: standalone.localdomain
+    use: systemd
+  delegate_to: allinone
+  become: true
+
+- name: Get current network connections on standalone
+  tags: [network, standalone]
+  ansible.builtin.shell: nmcli connection show | awk '{print $1}' | tail -n +2
+  register: nmcli_connections_standalone
+  delegate_to: allinone
+  become: true
+  changed_when: false
+
+- name: Delete legacy NetworkManager connections on standalone
+  tags: [network, standalone]
+  ansible.builtin.shell: nmcli connection delete "{{ item }}"
+  loop:
+    - "Wired connection 2"
+    - "Wired connection 3"
+    - "Wired connection 4"
+    - "Wired connection 5"
+    - "Wired connection 6"
+  delegate_to: allinone
+  become: true
+  ignore_errors: true
+
+- name: Configure network interfaces on standalone
+  tags: [network, standalone]
+  ansible.builtin.shell: |
+    nmcli con add con-name "static-eth{{ item.interface }}" ifname eth{{ item.interface }} type ethernet ip4 {{ item.ip }}/24
+    nmcli con up "static-eth{{ item.interface }}"
+  loop:
+    - { interface: 1, ip: "172.22.0.15" }
+    - { interface: 2, ip: "172.17.0.15" }
+    - { interface: 3, ip: "172.18.0.15" }
+    - { interface: 4, ip: "172.19.0.15" }
+    - { interface: 5, ip: "172.21.0.15" }
+  delegate_to: allinone
+  become: true
+
+# === Compute Node 2 Network Configuration ===
+- name: Configure hostname on compute02
+  tags: [network, compute02]
+  ansible.builtin.hostname:
+    name: compute02.localdomain
+    use: systemd
+  delegate_to: compute02
+  become: true
+
+- name: Delete legacy NetworkManager connections on compute02
+  tags: [network, compute02]
+  ansible.builtin.shell: nmcli connection delete "{{ item }}"
+  loop:
+    - "Wired connection 2"
+    - "Wired connection 3"
+    - "Wired connection 4"
+    - "Wired connection 5"
+    - "Wired connection 6"
+  delegate_to: compute02
+  become: true
+  ignore_errors: true
+
+- name: Configure network interfaces on compute02
+  tags: [network, compute02]
+  ansible.builtin.shell: |
+    nmcli con add con-name "static-eth{{ item.interface }}" ifname eth{{ item.interface }} type ethernet ip4 {{ item.ip }}/24
+    nmcli con up "static-eth{{ item.interface }}"
+  loop:
+    - { interface: 1, ip: "172.22.0.110" }
+    - { interface: 2, ip: "172.17.0.110" }
+    - { interface: 3, ip: "172.18.0.110" }
+    - { interface: 4, ip: "172.19.0.110" }
+    - { interface: 5, ip: "172.21.0.110" }
+  delegate_to: compute02
+  become: true
+
+# === Compute Node 3 Network Configuration ===
+- name: Configure hostname on compute03
+  tags: [network, compute03]
+  ansible.builtin.hostname:
+    name: compute03.localdomain
+    use: systemd
+  delegate_to: compute03
+  become: true
+
+- name: Delete legacy NetworkManager connections on compute03
+  tags: [network, compute03]
+  ansible.builtin.shell: nmcli connection delete "{{ item }}"
+  loop:
+    - "Wired connection 2"
+    - "Wired connection 3"
+    - "Wired connection 4"
+    - "Wired connection 5"
+    - "Wired connection 6"
+  delegate_to: compute03
+  become: true
+  ignore_errors: true
+
+- name: Configure network interfaces on compute03
+  tags: [network, compute03]
+  ansible.builtin.shell: |
+    nmcli con add con-name "static-eth{{ item.interface }}" ifname eth{{ item.interface }} type ethernet ip4 {{ item.ip }}/24
+    nmcli con up "static-eth{{ item.interface }}"
+  loop:
+    - { interface: 1, ip: "172.22.0.112" }
+    - { interface: 2, ip: "172.17.0.112" }
+    - { interface: 3, ip: "172.18.0.112" }
+    - { interface: 4, ip: "172.19.0.112" }
+    - { interface: 5, ip: "172.21.0.112" }
+  delegate_to: compute03
+  become: true
+
+# === RHOSP 17.1 Standalone Controller Installation ===
+- name: Setup SSH agent on standalone
+  tags: [standalone, install]
+  ansible.builtin.shell: |
+    eval "$(ssh-agent -s)"
+    ssh-add ~/.ssh/{{ guid }}key.pem
+  delegate_to: allinone
+  become_user: cloud-user
+
+- name: Register standalone with Red Hat Subscription Manager
+  tags: [standalone, install, rhsm]
+  ansible.builtin.shell:
+    subscription-manager register --username {{ subscription_manager_username }} --password {{ subscription_manager_password }}
+  delegate_to: allinone
+  become: true
+  no_log: true
+
+- name: Configure repositories on standalone
+  tags: [standalone, install, rhsm]
+  ansible.builtin.shell: |
+    subscription-manager release --set=9.2
+    subscription-manager repos --disable=*
+    subscription-manager repos --enable=rhel-9-for-x86_64-baseos-eus-rpms \
+      --enable=rhel-9-for-x86_64-appstream-eus-rpms \
+      --enable=rhel-9-for-x86_64-highavailability-eus-rpms \
+      --enable=openstack-17.1-for-rhel-9-x86_64-rpms \
+      --enable=fast-datapath-for-rhel-9-x86_64-rpms
+  delegate_to: allinone
+  become: true
+
+- name: Update packages on standalone
+  tags: [standalone, install]
+  ansible.builtin.dnf:
+    name: '*'
+    state: latest
+  delegate_to: allinone
+  become: true
+
+- name: Install required packages on standalone
+  tags: [standalone, install]
+  ansible.builtin.dnf:
+    name:
+      - python3-tripleoclient
+      - python-jinja2
+      - git
+      - python3.11
+    state: present
+  delegate_to: allinone
+  become: true
+
+- name: Clone repository on standalone
+  tags: [standalone, install]
+  ansible.builtin.git:
+    repo: https://github.com/rh-osp-demo/showroom_osp-on-ocp-day2.git
+    dest: ~/labrepo
+    update: yes
+  delegate_to: allinone
+  become_user: cloud-user
+
+- name: Copy standalone files to home directory
+  tags: [standalone, install]
+  ansible.builtin.shell: cp -n ~/labrepo/content/standalone/* /home/cloud-user/
+  delegate_to: allinone
+  become_user: cloud-user
+
+- name: Run openstack_standalone.sh script
+  tags: [standalone, install]
+  ansible.builtin.shell:
+    ~/openstack_standalone.sh > ~/openstack_standalone_$(date +%s).log 2>&1
+  delegate_to: allinone
+  become_user: cloud-user
+  async: 3600
+  poll: 60
+
+- name: Wait for OpenStack deployment to complete
+  tags: [standalone, install]
+  ansible.builtin.wait_for:
+    path: /home/cloud-user/.config/openstack/clouds.yaml
+    timeout: 3600
+  delegate_to: allinone
+  become_user: cloud-user
+
+# === Disable Standalone Compute ===
+- name: Disable standalone compute service
+  tags: [standalone, disable_compute]
+  ansible.builtin.shell: |
+    openstack compute service set --disable standalone.localdomain nova-compute
+    sudo systemctl stop tripleo_nova_compute.service
+    sudo systemctl disable tripleo_nova_compute.service
+    openstack compute service delete 5 || true
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+
+# === Generate Files for Compute Installation ===
+- name: Run openstack_compute_prepare.sh script
+  tags: [standalone, compute_prepare]
+  ansible.builtin.shell: |
+    cd ~
+    sh openstack_compute_prepare.sh
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_AUTH_TYPE: none
+    OS_ENDPOINT: http://127.0.0.1:8006/v1/admin
+
+- name: Copy oslo.yaml and passwords.yaml to compute02
+  tags: [standalone, compute_prepare]
+  ansible.builtin.command:
+    scp -i ~/.ssh/{{ guid }}key.pem -o StrictHostKeyChecking=accept-new {{ item }} cloud-user@compute02:~/
+  loop:
+    - ~/oslo.yaml
+    - ~/passwords.yaml
+  delegate_to: allinone
+  become_user: cloud-user
+
+- name: Copy oslo.yaml and passwords.yaml to compute03
+  tags: [standalone, compute_prepare]
+  ansible.builtin.command:
+    scp -i ~/.ssh/{{ guid }}key.pem -o StrictHostKeyChecking=accept-new {{ item }} cloud-user@compute03:~/
+  loop:
+    - ~/oslo.yaml
+    - ~/passwords.yaml
+  delegate_to: allinone
+  become_user: cloud-user
+
+# === Install Compute Node 2 ===
+- name: Register compute02 with Red Hat Subscription Manager
+  tags: [compute02, install, rhsm]
+  ansible.builtin.shell: |
+    subscription-manager register --username {{ subscription_manager_username }} --password {{ subscription_manager_password }}
+  delegate_to: compute02
+  become: true
+  no_log: true
+
+- name: Configure repositories on compute02
+  tags: [standalone, install, rhsm]
+  ansible.builtin.shell: |
+    subscription-manager release --set=9.2
+    subscription-manager repos --disable=*
+    subscription-manager repos --enable=rhel-9-for-x86_64-baseos-eus-rpms \
+      --enable=rhel-9-for-x86_64-appstream-eus-rpms \
+      --enable=rhel-9-for-x86_64-highavailability-eus-rpms \
+      --enable=openstack-17.1-for-rhel-9-x86_64-rpms \
+      --enable=fast-datapath-for-rhel-9-x86_64-rpms
+  delegate_to: compute02
+  become: true
+
+- name: Update packages on compute02
+  tags: [compute02, install]
+  ansible.builtin.dnf:
+    name: '*'
+    state: latest
+  delegate_to: compute02
+  become: true
+
+- name: Install required packages on compute02
+  tags: [compute02, install]
+  ansible.builtin.dnf:
+    name:
+      - python3-tripleoclient
+      - python-jinja2
+      - git
+      - python3.11
+    state: present
+  delegate_to: compute02
+  become: true
+
+- name: Clone repository on compute02
+  tags: [compute02, install]
+  ansible.builtin.git:
+    repo: https://github.com/rh-osp-demo/showroom_osp-on-ocp-day2.git
+    dest: ~/labrepo
+    update: yes
+  delegate_to: compute02
+  become_user: cloud-user
+
+- name: Copy standalone files to compute02
+  tags: [compute02, install]
+  ansible.builtin.shell: cp -n ~/labrepo/content/standalone/* /home/cloud-user/
+  delegate_to: compute02
+  become_user: cloud-user
+
+- name: Run openstack_compute_02.sh script
+  tags: [compute02, install]
+  ansible.builtin.shell:
+    ~/openstack_compute_02.sh > ~/openstack_compute_02_$(date +%s).log 2>&1
+  delegate_to: compute02
+  become_user: cloud-user
+  async: 3600
+  poll: 60
+
+# === Install Compute Node 3 ===
+- name: Register compute03 with Red Hat Subscription Manager
+  tags: [compute03, install, rhsm]
+  ansible.builtin.shell:
+    subscription-manager register --username {{ subscription_manager_username }} --password {{ subscription_manager_password }}
+  delegate_to: compute03
+  become: true
+  no_log: true
+
+- name: Configure repositories on compute03
+  tags: [compute03, install, rhsm]
+  ansible.builtin.shell: |
+    subscription-manager release --set=9.2
+    subscription-manager repos --disable=*
+    subscription-manager repos --enable=rhel-9-for-x86_64-baseos-eus-rpms \
+      --enable=rhel-9-for-x86_64-appstream-eus-rpms \
+      --enable=rhel-9-for-x86_64-highavailability-eus-rpms \
+      --enable=openstack-17.1-for-rhel-9-x86_64-rpms \
+      --enable=fast-datapath-for-rhel-9-x86_64-rpms
+  delegate_to: compute03
+  become: true
+
+- name: Update packages on compute03
+  tags: [compute03, install]
+  ansible.builtin.dnf:
+    name: '*'
+    state: latest
+  delegate_to: compute03
+  become: true
+
+- name: Install required packages on compute03
+  tags: [compute03, install]
+  ansible.builtin.dnf:
+    name:
+      - python3-tripleoclient
+      - python-jinja2
+      - git
+      - python3.11
+    state: present
+  delegate_to: compute03
+  become: true
+
+- name: Clone repository on compute03
+  tags: [compute03, install]
+  ansible.builtin.git:
+    repo: https://github.com/rh-osp-demo/showroom_osp-on-ocp-day2.git
+    dest: ~/labrepo
+    update: yes
+  delegate_to: compute03
+  become_user: cloud-user
+
+- name: Copy standalone files to compute03
+  tags: [compute03, install]
+  ansible.builtin.shell: cp -n ~/labrepo/content/standalone/* /home/cloud-user/
+  delegate_to: compute03
+  become_user: cloud-user
+
+- name: Run openstack_compute_03.sh script
+  tags: [compute03, install]
+  ansible.builtin.shell:
+    ~/openstack_compute_03.sh > ~/openstack_compute_03_$(date +%s).log 2>&1
+  delegate_to: compute03
+  become_user: cloud-user
+  async: 3600
+  poll: 60
+
+# === Discover Compute Hosts ===
+- name: Discover compute hosts
+  tags: [standalone, discover]
+  ansible.builtin.shell: |
+    podman exec -it nova_api nova-manage cell_v2 discover_hosts --verbose
+  delegate_to: allinone
+  become: true
+  register: discover_result
+
+- name: Display discover hosts output
+  tags: [standalone, discover]
+  ansible.builtin.debug:
+    var: discover_result.stdout_lines
+
+# === Create Workloads ===
+- name: Set OpenStack environment variables
+  tags: [standalone, workloads]
+  ansible.builtin.set_fact:
+    os_cloud: standalone
+    gateway: "172.21.0.1"
+    public_network_cidr: "172.21.0.0/24"
+    private_network_cidr: "192.168.100.0/24"
+    public_net_start: "172.21.0.200"
+    public_net_end: "172.21.0.210"
+    dns_server: "172.30.0.10"
+
+- name: Create tiny flavor
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack flavor create --ram 512 --disk 1 --vcpu 1 --public tiny
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Download cirros image
+  tags: [standalone, workloads]
+  ansible.builtin.get_url:
+    url: https://github.com/cirros-dev/cirros/releases/download/0.6.2/cirros-0.6.2-x86_64-disk.img
+    dest: ~/cirros-0.6.2-x86_64-disk.img
+    mode: '0644'
+  delegate_to: allinone
+  become_user: cloud-user
+
+- name: Create cirros image
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack image create cirros --container-format bare --disk-format qcow2 --public --file cirros-0.6.2-x86_64-disk.img
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Generate SSH key pair if not exists
+  tags: [standalone, workloads]
+  ansible.builtin.shell: |
+    ssh-keygen -m PEM -t rsa -b 2048 -f ~/.ssh/id_rsa_pem -N ""
+  delegate_to: allinone
+  become_user: cloud-user
+  args:
+    creates: ~/.ssh/id_rsa_pem
+
+- name: Create OpenStack keypair
+  tags: [standalone, workloads]
+  ansible.builtin.shell: |
+    openstack keypair create --public-key ~/.ssh/id_rsa_pem.pub default
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Create basic security group
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack security group create basic
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Create security group rules
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack security group rule create basic --protocol {{ item.protocol }} {{ item.options | default('') }} {{ item.remote_ip | default('') }}
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  loop:
+    - { protocol: tcp, options: "--dst-port 22:22", remote_ip: "--remote-ip 0.0.0.0/0" }
+    - { protocol: icmp }
+    - { protocol: udp, options: "--dst-port 53:53" }
+  ignore_errors: true
+
+- name: Create public network
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack network create --external --provider-physical-network datacentre --provider-network-type flat public
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Create private network
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack network create --internal private
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Create public subnet
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack subnet create public-net \
+      --subnet-range {{ public_network_cidr }} \
+      --no-dhcp \
+      --gateway {{ gateway }} \
+      --allocation-pool start={{ public_net_start }},end={{ public_net_end }} \
+      --network public
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Create private subnet
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack subnet create private-net \
+      --subnet-range {{ private_network_cidr }} \
+      --network private
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Create router
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack router create vrouter
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Set router external gateway
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack router set vrouter --external-gateway public
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Add private subnet to router
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack router add subnet vrouter private-net
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Create test server on compute02
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack server create \
+      --flavor tiny --key-name default --network private --security-group basic \
+      --availability-zone=nova:compute02.localdomain \
+      --image cirros test-server-compute-02
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  register: server02_result
+  ignore_errors: true
+
+- name: Create floating IP for compute02 server
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack floating ip create public --floating-ip-address 172.21.0.204
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Create test server on compute03
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack server create \
+      --flavor tiny --key-name default --network private --security-group basic \
+      --availability-zone=nova:compute03.localdomain \
+      --image cirros test-server-compute-03
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  register: server03_result
+  ignore_errors: true
+
+- name: Create floating IP for compute03 server
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack floating ip create public --floating-ip-address 172.21.0.205
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Associate floating IP to compute02 server
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack server add floating ip test-server-compute-02 172.21.0.204
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true
+
+- name: Associate floating IP to compute03 server
+  tags: [standalone, workloads]
+  ansible.builtin.command: |
+    openstack server add floating ip test-server-compute-03 172.21.0.205
+  delegate_to: allinone
+  become_user: cloud-user
+  environment:
+    OS_CLOUD: standalone
+  ignore_errors: true

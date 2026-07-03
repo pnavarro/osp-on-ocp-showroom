@@ -1,0 +1,37 @@
+= Create the OpenStack Control Plane
+
+We will be using a preconfigured file (*files/osp-ng-ctlplane-deploy.yaml*) to create the control plane and at the same time enable the required services, configure the control plane network, and configure the service back ends.
+The control plane we will be using the NFS server we installed in the previous section to store cinder volumes.
+
+== Prepare the secret to place the NFS server connection used by Cinder
+
+In the bastion:
+
+[source,bash,role=execute]
+----
+oc create secret generic cinder-nfs-config --from-file=nfs-cinder-conf
+----
+
+== Finally create the OpenStack control plane
+
+[source,bash,role=execute]
+----
+oc create -f osp-ng-ctlplane-deploy.yaml
+----
+
+Wait until the OpenStack control plane deployment is completed:
+
+[source,bash,role=execute]
+----
+oc get openstackcontrolplane -n openstack -w
+----
+
+WARNING: This can take several minutes.
+
+Type Control + C, to exit the wait command when you see message "Setup Complete"
+
+.Sample Output
+----
+NAME                                 STATUS   MESSAGE
+openstack-control-plane   True     Setup complete
+----

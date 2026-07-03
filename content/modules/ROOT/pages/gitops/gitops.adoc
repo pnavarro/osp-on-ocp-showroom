@@ -1,0 +1,98 @@
+# Install and discover RHOSO using Gitops ArgoCD
+
+Welcome to the Red Hat OpenStack Services on OpenShift (RHOSO) lab instructions.
+These instructions will guide you through the installation of the next generation of Red Hat's OpenStack product onto an existing OpenShift Cluster utilizing a bastion host and a single host for the data plane.
+
+In this lab, you will use the following infrastructure:
+
+* A 3 OCP controller/worker 4.16 OCP cluster
+* A bastion host to access to the OCP environment
+* A RHEL 9.4 virtualised compute host
+
+In this lab, you will cover the following topics:
+
+* xref:prereqs-gitops.adoc[Install the Operators prerequisites using OpenShift gitops]
+* xref:install-operators-gitops.adoc[Install the Red Hat OpenStack Platform Service Operators using OpenShift gitops]
+* xref:secure.adoc[Configure Secure Access for OpenStack Services]
+* xref:install-nfs-server.adoc[Install NFS server]
+* xref:deploy-control-plane-gitops.adoc[Deploy RHOSO control plane using OpenShift gitops]
+* xref:deploy-data-plane-gitops.adoc[Deploy RHOSO data plane using OpenShift gitops]
+* xref:access-gitops.adoc[Access OpenStack]
+
+Within the lab environment, you will be able to copy and paste the specified commands into the CLI.
+For some steps you may also need to edit some of the commands from the  instructions.
+
+[IMPORTANT]
+The content presented in this guide is not officially supported by Red Hat. It is intended solely for exploratory purposes and to gather feedback that may inform potential future productization.
+
+== Fork the Lab Repository
+
+Fork the GitHub repository into your personal GitHub space:
+
+https://github.com/rh-osp-demo/showroom_osp-on-ocp-day2
+
+== Access Your Lab Environment
+
+. Access to the bastion executing the following command: 
++
+[source,bash,role=execute,subs=attributes]
+----
+ssh {bastion_ssh_user_name}@{bastion_public_hostname} -p {bastion_ssh_port} 
+----
++
+SSH password is `{bastion_ssh_password}`. The uuid of your lab is: `{guid}`
+. Optionally copy your public SSH key to the bastion allowing you to authenticate with the server without entering a password every time you connect: 
++
+[source,bash,role=execute,subs=attributes]
+----
+ssh-copy-id -p {bastion_ssh_port} {bastion_ssh_user_name}@{bastion_public_hostname} 
+----
++
+
+If needed, you can navigate to the OpenShift console URL: {openshift_cluster_console_url}[{openshift_cluster_console_url}^] using user `admin` and password `{openshift_cluster_admin_password}`
+
+== Add the Bastion SSH Key to the SSH Agent
+
+In the bastion, add the bastion ssh key to the ssh agent:
+
+[source,bash,role=execute,subs=attributes]
+----
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/{guid}key.pem
+----
+
+== Add the SSH Public Key to GitHub
+
+Copy the public key `~/.ssh/{guid}key.pub` from the bastion to your GitHub account:
+
+1. Copy the SSH public key to your clipboard.
+2. In the forked repository page, click on the *Settings* tab.
+3. In the *Code and automation* section, click *Deploy keys*.
+4. Click *Add deploy key*.
+5. In the *Title* field, add a descriptive label, such as `"bastion RHOSO gitops key"`.
+6. Click *Add SSH key*.
+7. Paste the SSH public key into the *Key* field.
+8. Check the *Allow write access* checkbox.
+9. Click *Save*.
+
+== Set Your Repository URL
+
+In the next chapter, we will refer to your forked repository using the variable: "$your_github_id", for example:
+
+[source,bash,subs=attributes]
+----
+your_github_id=pnavarro
+----
+
+== Clone Your Forked Repository
+
+In the bastion, clone your forked repository to the bastion using SSH:
+
+[source,bash]
+----
+cd
+git clone git@github.com:$your_github_id/showroom_osp-on-ocp-day2.git labrepo
+cd labrepo
+----
+
+*Be sure to review all commands carefully for both functionality and syntax!*

@@ -1,5 +1,5 @@
 name: modules
-title: 'From Proprietary to Powerful: Accelerate Your VMware Migration to the Red Hat Hybrid Cloud'
+title: 'Red Hat OpenStack Services on Openshift labs'
 version: ~
 nav:
   - modules/ROOT/nav.adoc

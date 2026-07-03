@@ -1,0 +1,53 @@
+# Enable the Object Storage Service - Swift
+
+. Patch the openstack control plane
++
+In the bastion, patch the openstack control plane CR:
++
+[source,bash,role=execute]
+----
+oc patch openstackcontrolplane openstack-control-plane --type=merge --patch '
+spec:
+  swift:
+    enabled: true
+    template:
+      memcachedInstance: memcached
+      swiftRing:
+        ringReplicas: 1
+      swiftStorage:
+        replicas: 1
+        networkAttachments:
+        - storage
+        storageClass: ocs-external-storagecluster-ceph-rbd
+        storageRequest: 10Gi
+      swiftProxy:
+        secret: osp-secret
+        replicas: 1
+        serviceUser: swift
+        override:
+          service:
+            internal:
+              metadata:
+                annotations:
+                  metallb.universe.tf/address-pool: internalapi
+                  metallb.universe.tf/allow-shared-ip: internalapi
+                  metallb.universe.tf/loadBalancerIPs: 172.17.0.89
+              spec:
+                type: LoadBalancer
+        networkAttachments:
+        - storage
+'
+----
+
+. Inspect the resulting Object storage service pods:
++
+[source,bash,role=execute]
+----
+oc get pods -l component=swift-proxy
+----
+
+.Sample Output
+----
+NAME                           READY   STATUS    RESTARTS   AGE
+swift-proxy-6d95668579-7r256   2/2     Running   0          33m
+----

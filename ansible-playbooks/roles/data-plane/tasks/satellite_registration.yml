@@ -1,0 +1,72 @@
+---
+# Optional Satellite registration for RHDP labs (demosat).
+# Skipped entirely when satellite_url is not set — Customer Portal flow is unchanged.
+
+- name: Install Satellite CA certificate on compute node
+  when: satellite_url | default('') | length > 0
+  delegate_to: compute01
+  become: true
+  block:
+    - name: Download Katello CA consumer package
+      ansible.builtin.get_url:
+        url: "https://{{ satellite_url }}/pub/katello-ca-consumer-latest.noarch.rpm"
+        dest: /tmp/katello-ca-consumer-latest.noarch.rpm
+        mode: "0644"
+        validate_certs: false
+
+    - name: Install Katello CA consumer package
+      ansible.builtin.dnf:
+        name: /tmp/katello-ca-consumer-latest.noarch.rpm
+        state: present
+        disablerepo: "*"
+        disable_gpg_check: true
+
+- name: Build Satellite subscription manager authentication JSON
+  ansible.builtin.set_fact:
+    rhc_auth_json: "{{ {'activation_keys': {'keys': rhc_activation_keys}} | to_json }}"
+  when:
+    - satellite_url | default('') | length > 0
+    - rhc_activation_keys | length > 0
+
+- name: Quote rhc_organization for Satellite subscription-manager Secret
+  ansible.builtin.set_fact:
+    rhc_organization_quoted: "{{ satellite_org | regex_replace('^', _rhc_org_quote) | regex_replace('$', _rhc_org_quote) }}"
+  vars:
+    _rhc_org_quote: '"'
+  when:
+    - satellite_url | default('') | length > 0
+    - satellite_org | default('') | length > 0
+    - rhc_activation_keys | length > 0
+
+- name: Build Satellite rhc_server JSON for subscription-manager Secret
+  ansible.builtin.set_fact:
+    rhc_server_json: "{{ {'hostname': satellite_url, 'port': 443, 'insecure': satellite_insecure | bool} | to_json }}"
+  when: satellite_url | default('') | length > 0
+
+- name: Remove legacy Satellite vars block from data plane node set manifest
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_env.HOME }}/{{ files_directory }}/osp-ng-dataplane-node-set-deploy.yaml"
+    marker: "# {mark} ANSIBLE MANAGED SATELLITE VARS"
+    state: absent
+  when: satellite_url | default('') | length > 0
+
+- name: Create subscription manager secret for Satellite
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: subscription-manager
+        namespace: "{{ openstack_namespace }}"
+      type: Opaque
+      stringData:
+        rhc_auth: "{{ rhc_auth_json }}"
+        rhc_organization: "{{ rhc_organization_quoted }}"
+        rhc_server: "{{ rhc_server_json }}"
+        rhc_baseurl: "https://{{ satellite_url }}/pulp/repos"
+        rhc_insights: '{"state": "absent"}'
+  when:
+    - satellite_url | default('') | length > 0
+    - rhc_activation_keys | length > 0
+    - satellite_org | default('') | length > 0

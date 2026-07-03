@@ -1,0 +1,336 @@
+= Using runscript and bootscript hooks in VMware migration
+
+The Red Hat OpenStack VMware Migration Kit uses two types of scripts to customize guest operating systems during and after migration: the *runscript* (run during conversion) and the *bootscript* (run on first boot in OpenStack). This lab explains what they do, when they run, and how to use them.
+
+== Overview
+
+During the cutover phase, the migration toolkit uses `virt-v2v-in-place` on the conversion host to adapt the guest (e.g., install virtio drivers, adjust configuration). Two optional script hooks integrate with this process:
+
+* *Runscript* — A script executed *during* conversion while the guest disk is mounted. It runs in the context of the conversion host against the guest filesystem (via libguestfs). Typical use: network interface configuration so that device names stay consistent after migration.
+* *Bootscript* — A script that is *injected* into the guest so it runs on the *first boot* of the migrated VM in OpenStack. Typical use: one-time customization such as network configuration or cloud-init-style setup.
+
+Both are passed through to `virt-v2v-in-place` as `--run` and `--firstboot` respectively. The runscript is only used for Linux guests; the bootscript can be used for any guest type.
+
+== Runscript: execution during conversion
+
+=== What it does
+
+The runscript runs *during* the conversion step, while the guest disk is accessible from the conversion host. It is executed inside the guest image context (via libguestfs), so it can modify files and scripts inside the guest (e.g., `/etc/udev/rules.d/`) before the VM ever boots in OpenStack.
+
+=== Default runscript: network_config.sh
+
+For Linux VMs, the migration kit generates a *runscript* automatically so that network device names remain stable after migration. Without this, NIC names can change (e.g., from `eth0` to `ens3`) and break networking.
+
+.The collection generates this script from a Jinja2 template and passes it to the migrate module as the runscript.
+
+* The `import_workloads` role creates a script at `{{ os_migrate_vmw_data_dir }}/{{ vm_name }}/network_config.sh` from the template `network_config.sh.j2`.
+* The template is filled with MAC addresses extracted from the source VM (from `macs.json` or `nics.json`).
+* The generated script detects the guest’s network configuration (NetworkManager, sysconfig, or netplan) and writes udev rules (e.g., `/etc/udev/rules.d/70-persistent-net.rules`) so that each MAC address keeps the same device name (e.g., `eth0`, `ens3`) after migration.
+
+You do not need to provide a runscript for this behavior; it is the default for Linux when cutover (and thus V2V conversion) runs.
+
+=== When the runscript is used
+
+* The runscript is only used when *all* of the following are true:
+** The guest is detected as a Linux family OS.
+** A runscript path is provided to the migrate module (by default the role sets it to the generated `network_config.sh`).
+** The migration is performing V2V conversion (typically during cutover, not during CBT sync-only).
+
+If you use custom variables and override the runscript passed to the migrate module, ensure the path exists on the conversion host where the migrate module runs.
+
+== Bootscript: execution on first boot in OpenStack
+
+=== What it does
+
+The bootscript is a path to a script file that `virt-v2v-in-place` configures to run *once* on the first boot of the migrated VM in OpenStack. The script is installed into the guest (e.g., via a systemd service or similar mechanism by virt-v2v). Use it for one-time guest customization that must happen after the VM is running in the destination cloud (e.g., network configuration, registration, or cloud-init-like setup).
+
+=== How to provide a bootscript
+
+The bootscript is *optional*. To use one:
+
+IMPORTANT: The file at `boot_script_path` must exist *on the conversion host*. The migrate module runs on the conversion host and passes this path to `virt-v2v-in-place --firstboot`; the conversion host reads the script and injects it into the guest. If the path is missing there, the migration will fail.
+
+. Create the script on the conversion host (or copy it there before the migrate task runs).
+. Use a path that is valid on the conversion host (e.g. `/opt/os-migrate/scripts/firstboot.sh`).
+. Set `boot_script_path` (or `import_workloads_boot_script_path`) in your extra variables to that path.
+
+The role uses `import_workloads_boot_script_path`, which defaults to the value of `boot_script_path`. So you can set either in your extra variables or group vars.
+
+.Example: Setting the bootscript in extra variables
+[source,yaml]
+----
+# Optional: path to a script to run on first boot of the migrated VM in OpenStack
+boot_script_path: /path/on/conv/host/firstboot.sh
+----
+
+If you use a path that is only on the Ansible controller, you must ensure the role or playbook copies that file to the conversion host before the migrate task runs, and then set `boot_script_path` (or `import_workloads_boot_script_path`) to that destination path.
+
+=== Example: creating a bootscript
+
+This example creates a first-boot script on the conversion host, makes it executable, and wires it into the migration so it runs once when the migrated VM boots in OpenStack.
+
+SSH to the conversion host:
+
+[source,bash,role=execute,subs=attributes]
+----
+ssh -i /home/lab-user/.ssh/{guid}key.pem cloud-user@{rhoso_conversion_host_ip}
+----
+
+In the conversion host, create the script:
+
+[source,bash,role=execute]
+----
+sudo mkdir -p /opt/os-migrate/scripts
+sudo tee /opt/os-migrate/scripts/firstboot.sh << 'SCRIPT'
+#!/bin/bash
+# First-boot script for migrated VMs - runs once in OpenStack
+set -e
+MARKER="/etc/os-migrate-firstboot-done"
+[ -f "$MARKER" ] && exit 0
+
+touch "$MARKER"
+SCRIPT
+sudo chmod 0755 /opt/os-migrate/scripts/firstboot.sh
+----
+
+== Creating the virtual machine to be migrated
+
+In the current vcenter environment, there is no virtual machine with CBT enabled. You will create a new virtual machine with CBT enabled. 
+
+In the bastion, we will be using the `govc` command to create the virtual machine. First install it in the bastion:
+[source,bash,role=execute]
+----
+curl -L -o govc.tar.gz https://github.com/vmware/govmomi/releases/latest/download/govc_Linux_x86_64.tar.gz
+tar -xzf govc.tar.gz
+----
+
+Then set the environment variables for the `govc` command:
+[source,bash,role=execute,subs=attributes]
+----
+export GOVC_URL='{vcenter_console}'
+export GOVC_USERNAME='{vcenter_full_user}'
+export GOVC_PASSWORD='{vcenter_password}'
+export GOVC_INSECURE=true
+export GOVC_NETWORK='segment-migrating-to-ocpvirt'
+----
+
+Create the virtual machine, inject the cloud-init data and power on the virtual machine, root password is `redhat`:
+
+Set the GUID and read the public key (run this first):
+[source,bash,role=execute,subs=attributes]
+----
+GUID='{guid}'
+PUBKEY_FILE="/home/lab-user/.ssh/{guid}key.pub"
+PUBKEY="$(< "$PUBKEY_FILE")"
+VM_SOURCE="haproxy-{guid}"
+VM_NAME="rhel4hooks-{guid}"
+----
+
+Create the VM with cloud-init and power it on (run this second):
+[source,bash,role=execute,subs=none]
+----
+FOLDER="ocpvirt-$GUID"
+
+# Obtener el datacenter real desde vCenter a partir de la VM/template origen
+GOVC_DATACENTER=$(./govc find / -type m -name "$VM_SOURCE" | awk -F/ 'NF>1 {print $2; exit}')
+
+if [ -z "$GOVC_DATACENTER" ]; then
+  echo "Could not determine datacenter for VM source: $VM_SOURCE"
+  exit 1
+fi
+
+export GOVC_DATACENTER
+
+case "$GOVC_DATACENTER" in
+  RS01) export GOVC_DATASTORE='workload_share_kc7AL' ;;
+  RS00) export GOVC_DATASTORE='workload_share_QHFNI' ;;
+  *)
+    echo "Unsupported datacenter: $GOVC_DATACENTER"
+    exit 1
+    ;;
+esac
+
+USERDATA=$(printf '%s\n' \
+  '#cloud-config' \
+  'disable_root: false' \
+  'ssh_pwauth: true' \
+  '' \
+  'chpasswd:' \
+  '  list: |' \
+  '    root:redhat' \
+  '  expire: false' \
+  '' \
+  'ssh_authorized_keys:' \
+  "  - $PUBKEY" \
+)
+
+METADATA='{}'
+USERDATA_B64=$(printf "%s" "$USERDATA" | base64 | tr -d '\n')
+METADATA_B64=$(printf "%s" "$METADATA" | base64 | tr -d '\n')
+
+./govc vm.clone -vm="$VM_SOURCE" -folder="$FOLDER" -on=false -annotation='Created via govc' "$VM_NAME"
+
+./govc vm.change -vm "$VM_NAME" -e="ctkEnabled=TRUE"
+./govc vm.change -vm "$VM_NAME" -e="scsi0:0.ctkEnabled=TRUE"
+
+./govc vm.change -vm "$VM_NAME" \
+  -e "guestinfo.userdata=${USERDATA_B64}" \
+  -e "guestinfo.userdata.encoding=base64" \
+  -e "guestinfo.metadata=${METADATA_B64}" \
+  -e "guestinfo.metadata.encoding=base64"
+
+./govc vm.power -on "$VM_NAME"
+----
+
+
+Then, run the previous commands again.
+
+== Preparing the Bastion
+
+In the bastion, create the folder to store the ansible variables:
+
+[source,bash,role=execute]
+----
+cd
+mkdir -p /home/lab-user/os-migrate-env
+----
+
+Run the following commands to configure OpenStack CLI access:
+
+[source,bash,role=execute]
+----
+oc project openstack
+alias openstack="oc exec -t openstackclient -- openstack"
+----
+
+Retrieve necessary OpenStack parameters:
+
+[source,bash,role=execute]
+----
+SECURITY_GROUP_ID=$(openstack security group list | awk '/ basic / {print $2}')
+PROJECT_ID=$(openstack project list | grep ' admin ' | awk '{print $2}')
+AUTH_URL=$(openstack endpoint list --service identity --interface public -c URL -f value)
+----
+
+Create the `/home/lab-user/os-migrate-env/migration_with_bootscript.yaml` file:
+
+[source,bash,role=execute,subs=attributes]
+----
+cat << EOF > /home/lab-user/os-migrate-env/migration_with_bootscript.yaml
+os_migrate_tear_down: false
+import_workloads_vmware_insecure: true
+import_workloads_openstack_insecure: true
+openstack_insecure: true
+# osm working directory:
+runner_from_aee: true
+os_migrate_vmw_data_dir: /tmp/os-migrate
+copy_openstack_credentials_to_conv_host: false
+
+# Re-use an already deployed conversion host:
+already_deploy_conversion_host: true
+
+# If no mapped network, set the OpenStack network:
+openstack_private_network: private
+
+# Security groups for the instance:
+security_groups: ${SECURITY_GROUP_ID}
+use_existing_flavor: false
+
+# Network settings for OpenStack:
+os_migrate_create_network_port: true
+copy_metadata_to_conv_host: true
+used_mapped_networks: false
+
+os_migrate_configure_network: true
+
+vms_list:
+  - rhel4hooks-{guid}
+
+# Bootscript path:
+boot_script_path: /opt/os-migrate/scripts/firstboot.sh
+
+# VMware parameters:
+vcenter_hostname: {vcenter_console}
+vcenter_username: {vcenter_full_user}
+vcenter_password: {vcenter_password}
+vcenter_datacenter: RS01
+
+os_cloud_environ: demo.redhat.com
+dst_cloud:
+  auth:
+    auth_url: ${AUTH_URL}
+    username: admin
+    project_id: ${PROJECT_ID}
+    project_name: admin
+    user_domain_name: Default
+    password: openstack
+  region_name: regionOne
+  interface: public
+  insecure: true
+  openstack_insecure: true
+  identity_api_version: 3
+EOF
+----
+
+
+== Configuring the Seeding Job Template
+
+1. From the navigation panel, go to *Automation Execution* → *Templates*.
+2. Click *Create Template* → *Create Job Template* and set the following parameters:
+   * **Name:** Migration with Bootscript
+   * **Inventory:** Conversion Host Inventory
+   * **Project:** vmware migration toolkit project
+   * **Playbook:** `playbooks/migration.yml`
+   * **Execution Environment:** VMware Migration toolkit execution environment
+   * **Credentials:** Bastion key
+   * **Extra Variables:** Copy the content of `/home/lab-user/os-migrate-env/migration_with_bootscript.yaml` from the bastion
+3. Click *Create Job Template*.
+
+== Running the Seeding and Cutover Workflow
+
+*Running the full workflow (recommended for the lab):*
+
+1. From the navigation panel, go to *Automation Execution* → *Templates*.
+2. Locate the *Migration with Bootscript* template.
+3. Click the *rocket icon* to launch the workflow.
+4. The *Migration with Bootscript* job runs. Wait for it to complete.
+
+=== Access to the migrated virtual machine
+
+From the bastion, attach a floating IP to the migrated virtual machine:
+
+[source,bash,role=execute,subs=attributes]
+----
+openstack floating ip create public
+openstack server add floating ip rhel4hooks_{guid} {FLOATING_IP}
+----
+
+From the bastion, access to the migrated virtual machine:
+
+[source,bash,role=execute,subs=attributes]
+----
+ssh -i /home/lab-user/.ssh/{guid}key.pem root@{FLOATING_IP}
+----
+
+Check the output of the bootscript:
+
+[source,bash,role=execute]
+----
+cat /etc/os-migrate-firstboot-done
+----
+
+Cleanup the virtual machine in RHOSO:
+
+[source,bash,role=execute,subs=attributes]
+----
+openstack server delete rhel4hooks_{guid}
+openstack volume delete rhel4hooks_{guid}-2000
+openstack port delete rhel4hooks_{guid}-NIC-0-VLAN-private
+----
+
+=== Destroy the virtual machine in vCenter
+
+[source,bash,role=execute]
+----
+./govc vm.destroy rhel4hooks-{guid}
+----

@@ -1,59 +1,20 @@
-= From Proprietary to Powerful: Accelerate Your VMware Migration to the Red Hat Hybrid Cloud
+= Red Hat OpenStack Services on OpenShift labs
 
-Welcome to the VMware to Red Hat Hybrid Cloud migration workshop!
+Welcome to the Red Hat OpenStack Services on OpenShift (RHOSO) lab instructions.
+These instructions will guide you through the installation of the next generation of Red Hat's OpenStack product onto an existing OpenShift Cluster utilizing a bastion host and a single host for the data plane.
 
-== What you'll learn
+You have the following RHOSO installation and day2 operations labs available:
 
-In this workshop, you will:
+* xref:connected/connected.adoc[Install RHOSO using CDN - Connected environment]
+* xref:updates/updates.adoc[Install a previous version of RHOSO to update it to the latest]
+* xref:gitops/gitops.adoc[Install RHOSO using Gitops ArgoCD]
 
-* Explore the pre-deployed migration infrastructure components (Conversion Host, networks, security groups)
-* Review existing Ansible Automation Platform job workflows configured for VMware to OpenStack migration
-* Configure Ansible Automation Platform job workflows to perform VM seeding and final cutover
-* Experience a two-phase migration approach that minimizes downtime during maintenance windows
+You also have the following VMware to RHOSO VM migration labs available:
 
-== Who this is for
+* xref:migration_demo/01-overview.adoc[Vmware to RHOSO VM migration using Red Hat OpenStack Vmware Migration Toolkit demo]
+* xref:migration_step_by_step/migration.adoc[Vmware to RHOSO VM migration using Red Hat OpenStack Vmware Migration Toolkit installation step by step] 
 
-This workshop is designed for **Infrastructure Engineers and VMware Administrators** who want to learn how to migrate workloads from VMware to Red Hat OpenStack Services on OpenShift using Ansible Automation Platform.
+Within the lab environment, you will be able to copy and paste the specified commands into the CLI.
+For some steps you may also need to edit some of the commands from the  instructions.
 
-**Experience level**: Intermediate
-
-== Prerequisites
-
-Before starting this workshop, you should have:
-
-* Basic understanding of VMware vCenter and virtual machine management
-* Familiarity with OpenStack concepts (compute, networking, storage)
-* Basic knowledge of Ansible Automation Platform
-* Experience with Linux command line operations
-
-== Workshop environment
-
-Your lab environment is fully pre-configured with all the necessary infrastructure for VMware to OpenStack migration:
-
-* **Red Hat OpenShift cluster** hosting OpenStack services
-* **Red Hat OpenStack Services on OpenShift (RHOSO)** as the target cloud platform
-* **Ansible Automation Platform** for migration orchestration
-* **VMware vCenter** as the source environment
-* **Conversion Host** deployed in OpenStack for efficient data transfer
-* **Bastion host** for command-line access
-
-You will have access to:
-
-* OpenShift Console: {openshift_console_url}
-* Ansible Automation Platform: {aap_controller_web_url}
-* A tab already connected to the bastion host
-
-NOTE: All environment details and credentials are available in the lab interface.
-
-== Estimated time
-
-This workshop will take approximately **90 minutes** to complete.
-
-You can work at your own pace through the two main modules:
-
-* **Module 1**: Prerequisites and Migration Workflow (~40 minutes)
-* **Module 2**: Configure Seeding and Cutover Workflow (~45 minutes)
-
-== Let's get started!
-
-Click on **Workshop Overview** in the navigation to begin your learning journey.
+*Be sure to review all commands carefully both for functionality and syntax!*

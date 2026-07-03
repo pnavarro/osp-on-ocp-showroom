@@ -3,6 +3,10 @@
 :toc-placement: preamble
 :icons: font
 
+== Before you start
+
+Make sure that you have enabled the flag *"Deploy RHOSO and VMware Migration Toolkit automatically"* when deploying the catalog item in demo.redhat.com before starting the workshop.
+
 == Your role and mission
 
 You're a Senior Infrastructure Engineer at ACME Corp, and you've been assigned to evaluate Red Hat's hybrid cloud migration strategy for an urgent business transformation project.

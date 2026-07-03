@@ -1,0 +1,5 @@
+---
+# Defaults for basic-ha-proxy-migration role.
+# Override via play vars or vars_files (e.g. vars/migration.yml).
+# aap_controller_url and aap_api_token are set by configure-aap-api when run before this role.
+migration_config_dir: "os-migrate-env"

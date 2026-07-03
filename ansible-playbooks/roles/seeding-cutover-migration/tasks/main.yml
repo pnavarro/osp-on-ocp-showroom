@@ -1,0 +1,176 @@
+---
+# Seeding and Cutover VM Migration job templates
+# Reads seeding config (os_migrate_for_aap_seeding.yaml) and creates:
+# - "VM Seeding (Incremental Sync)" job template (cbt_sync: true, cutover: false)
+# - "VM Cutover (Final Cutover)" job template (cutover: true)
+# Intended to run after configure-aap-api (credentials, inventory, project, execution environment must exist).
+# Optionally creates workflow job template (Seeding → Approval → Cutover) when seeding_cutover_create_workflow is true.
+
+# Optional: create the CBT VM in VMware (clone from template, enable CBT, cloud-init, power on)
+- name: Create CBT VM in VMware for seeding/cutover migration
+  ansible.builtin.include_tasks: create_cbt_vm.yml
+  when: seeding_cutover_create_cbt_vm | default(true)
+
+# Read seeding configuration for job template extra vars
+- name: Get home directory
+  ansible.builtin.shell: echo $HOME
+  register: home_dir
+  changed_when: false
+
+- name: Check if seeding configuration file exists
+  ansible.builtin.stat:
+    path: "{{ home_dir.stdout }}/{{ migration_config_dir }}/{{ seeding_config_file }}"
+  register: seeding_config_file_stat
+
+- name: Check if base migration config exists (for optional seeding file creation)
+  ansible.builtin.stat:
+    path: "{{ home_dir.stdout }}/{{ migration_config_dir }}/os_migrate_for_aap.yaml"
+  register: base_migration_config_stat
+  when: not seeding_config_file_stat.stat.exists and seeding_config_create_from_base
+
+- name: Read base migration configuration
+  ansible.builtin.slurp:
+    src: "{{ home_dir.stdout }}/{{ migration_config_dir }}/os_migrate_for_aap.yaml"
+  register: base_migration_config_content
+  when: not seeding_config_file_stat.stat.exists and seeding_config_create_from_base and base_migration_config_stat.stat.exists
+
+- name: Create seeding config from base (cbt_sync true, cutover false)
+  ansible.builtin.copy:
+    content: "{{ (base_migration_config_content.content | b64decode | from_yaml) | combine({'cbt_sync': true, 'cutover': false, 'vms_list': seeding_cutover_vms_list}, recursive=false) | to_nice_yaml }}"
+    dest: "{{ home_dir.stdout }}/{{ migration_config_dir }}/{{ seeding_config_file }}"
+    mode: '0644'
+  when: not seeding_config_file_stat.stat.exists and seeding_config_create_from_base and base_migration_config_stat.stat.exists
+
+- name: Re-check seeding config exists after optional creation
+  ansible.builtin.stat:
+    path: "{{ home_dir.stdout }}/{{ migration_config_dir }}/{{ seeding_config_file }}"
+  register: seeding_config_file_stat
+
+- name: Read seeding configuration file
+  ansible.builtin.slurp:
+    src: "{{ home_dir.stdout }}/{{ migration_config_dir }}/{{ seeding_config_file }}"
+  register: seeding_config_content
+  when: seeding_config_file_stat.stat.exists
+
+- name: Parse seeding configuration
+  ansible.builtin.set_fact:
+    seeding_extra_vars: "{{ (seeding_config_content.content | b64decode | from_yaml) if seeding_config_file_stat.stat.exists else {} }}"
+
+- name: Fail when seeding config is missing
+  ansible.builtin.fail:
+    msg: "Seeding config not found at {{ home_dir.stdout }}/{{ migration_config_dir }}/{{ seeding_config_file }}. Run configure-aap-migration (or create the file) first."
+  when: not seeding_config_file_stat.stat.exists
+
+# Cutover extra vars: derive from seeding or read separate file
+- name: Check if cutover configuration file exists
+  ansible.builtin.stat:
+    path: "{{ home_dir.stdout }}/{{ migration_config_dir }}/{{ cutover_config_file }}"
+  register: cutover_config_file_stat
+  when: not cutover_derive_from_seeding
+
+- name: Read cutover configuration file
+  ansible.builtin.slurp:
+    src: "{{ home_dir.stdout }}/{{ migration_config_dir }}/{{ cutover_config_file }}"
+  register: cutover_config_content
+  when:
+    - not cutover_derive_from_seeding
+    - cutover_config_file_stat.stat.exists
+
+- name: Set cutover extra vars from file
+  ansible.builtin.set_fact:
+    cutover_extra_vars: "{{ cutover_config_content.content | b64decode | from_yaml }}"
+  when:
+    - not cutover_derive_from_seeding
+    - cutover_config_file_stat.stat.exists
+
+- name: Set cutover extra vars from seeding (cutover true)
+  ansible.builtin.set_fact:
+    cutover_extra_vars: "{{ seeding_extra_vars | combine({'cutover': true}, recursive=false) }}"
+  when: cutover_derive_from_seeding
+
+- name: Fail when cutover config is missing and not deriving from seeding
+  ansible.builtin.fail:
+    msg: "Cutover config not found at {{ home_dir.stdout }}/{{ migration_config_dir }}/{{ cutover_config_file }}. Set cutover_derive_from_seeding: true or create the file."
+  when:
+    - not cutover_derive_from_seeding
+    - not (cutover_config_file_stat.stat.exists | default(false))
+
+# Create Seeding Job Template
+- name: Create VM Seeding (Incremental Sync) Job Template
+  awx.awx.job_template:
+    name: "VM Seeding (Incremental Sync)"
+    description: "Phase 1 – CBT sync only; source VM stays running. Repeatable in maintenance windows with no workload impact."
+    job_type: "run"
+    inventory: "Conversion Host Inventory"
+    project: "vmware migration toolkit project"
+    playbook: "playbooks/migration.yml"
+    execution_environment: "VMware Migration toolkit execution environment"
+    credentials:
+      - "Bastion key"
+    extra_vars: "{{ seeding_extra_vars }}"
+    ask_variables_on_launch: true
+    state: present
+    controller_host: "{{ aap_controller_url }}"
+    controller_oauthtoken: "{{ aap_api_token }}"
+    validate_certs: false
+  register: seeding_job_template_result
+
+- name: Display seeding job template result
+  ansible.builtin.debug:
+    msg: |
+      {% if seeding_job_template_result.failed | default(false) %}
+      ❌ Seeding job template creation failed: {{ seeding_job_template_result.msg | default('Unknown error') }}
+      {% else %}
+      ✅ Job template "VM Seeding (Incremental Sync)" created successfully!
+         ID: {{ seeding_job_template_result.id | default('already exists') }}
+      {% endif %}
+
+# Create Cutover Job Template
+- name: Create VM Cutover (Final Cutover) Job Template
+  awx.awx.job_template:
+    name: "VM Cutover (Final Cutover)"
+    description: "Final phase – delta sync and guest conversion. Source VM powered off; run in maintenance window when tenant accepts outage."
+    job_type: "run"
+    inventory: "Conversion Host Inventory"
+    project: "vmware migration toolkit project"
+    playbook: "playbooks/migration.yml"
+    execution_environment: "VMware Migration toolkit execution environment"
+    credentials:
+      - "Bastion key"
+    extra_vars: "{{ cutover_extra_vars }}"
+    ask_variables_on_launch: true
+    state: present
+    controller_host: "{{ aap_controller_url }}"
+    controller_oauthtoken: "{{ aap_api_token }}"
+    validate_certs: false
+  register: cutover_job_template_result
+
+- name: Display cutover job template result
+  ansible.builtin.debug:
+    msg: |
+      {% if cutover_job_template_result.failed | default(false) %}
+      ❌ Cutover job template creation failed: {{ cutover_job_template_result.msg | default('Unknown error') }}
+      {% else %}
+      ✅ Job template "VM Cutover (Final Cutover)" created successfully!
+         ID: {{ cutover_job_template_result.id | default('already exists') }}
+      {% endif %}
+
+# Create workflow: Seeding → Approval → Cutover (per seeding-vm-in-maintenance-windows.adoc)
+- name: Create workflow job template (Seeding → Approval → Cutover)
+  ansible.builtin.include_tasks: create_workflow.yml
+  when: seeding_cutover_create_workflow | default(true) | bool
+
+- name: Display seeding and cutover next steps
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      VM Migration — Seeding and Cutover ready
+      ========================================
+      1. Access AAP: {{ aap_gateway_url | default('(set by configure-aap-api)') }}
+         Username: admin / Password: {{ aap_admin_password | default('(from AAP secret)') }}
+      2. Workflow "VM Migration — Seeding and Cutover" is created automatically (or create manually: Templates → Create → Workflow Job Template).
+         Steps: VM Seeding (Incremental Sync) → Approve cutover → VM Cutover (Final Cutover)
+      3. Run "VM Seeding (Incremental Sync)" alone for incremental syncs (no impact), or launch the workflow for seeding → approval → cutover.
+      Migration target(s): {{ seeding_extra_vars.vms_list | default(['(see extra_vars)']) | join(', ') }}
+      ========================================
+  when: not (seeding_job_template_result.failed | default(false)) and not (cutover_job_template_result.failed | default(false))

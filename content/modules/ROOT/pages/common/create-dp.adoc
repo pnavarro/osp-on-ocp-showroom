@@ -1,0 +1,157 @@
+= Configure the Data Plane
+
+Using a preconfigured yaml file(*files/osp-ng-dataplane-netconfig.yaml*) we will configure the topology for each data plane network.
+
+Change directory to the files:
+
+[source,bash,role=execute]
+----
+cd ~/labrepo/content/files
+----
+
+Apply the *network confguration*:
+
+[source,bash,role=execute]
+----
+oc apply -f osp-ng-dataplane-netconfig.yaml
+----
+
+== Login to the Compute and configure the control plane IP statically
+
+From the bastion login to the compute01 host:
+
+[source,bash,role=execute,subs=attributes]
+----
+ssh -i /home/lab-user/.ssh/{guid}key.pem cloud-user@compute01
+----
+
+[source,bash,role=execute,subs=attributes]
+----
+sudo hostnamectl set-hostname edpm-compute-1.sandbox-{guid}-ocp4-cluster.svc.cluster.local
+sudo nmcli con add con-name "static-eth1" ifname eth1 type ethernet ip4 172.22.0.100/24 ipv4.dns "172.22.0.89"
+sudo nmcli con up "static-eth1"
+sudo nmcli con add type ethernet ifname eth0 con-name eth0-dhcp ipv4.method auto ipv6.method ignore
+sudo nmcli con up eth0-dhcp
+sudo nmcli con mod eth0-dhcp connection.stable-id "user-set"
+----
+
+And log off VM
+
+[source,bash,role=execute]
+----
+logout
+----
+
+=== Finish the Dataplane
+
+From the bastion server, create Secret for ansible connection and nova migration of virtual machines
+
+[source,bash,role=execute,subs=attributes]
+----
+oc create secret generic dataplane-ansible-ssh-private-key-secret --save-config --dry-run=client --from-file=authorized_keys=/home/lab-user/.ssh/{guid}key.pub --from-file=ssh-privatekey=/home/lab-user/.ssh/{guid}key.pem --from-file=ssh-publickey=/home/lab-user/.ssh/{guid}key.pub -n openstack -o yaml | oc apply -f-
+ssh-keygen -f ./id -t ecdsa-sha2-nistp521 -N ''
+oc create secret generic nova-migration-ssh-key --from-file=ssh-privatekey=id --from-file=ssh-publickey=id.pub -n openstack -o yaml | oc apply -f-
+----
+
+Create a secret for the subscription manager:
+
+[IMPORTANT]
+
+Add your username and password from the https://www.redhat.com/wapps/ugc/protected/password.html[Red Hat Customer Portal]
+
+[source,bash,role=execute]
+----
+oc create secret generic subscription-manager \
+--from-literal rhc_auth='{"login": {"username": "your_username", "password": "your_password"}}' -n openstack
+----
+
+Create a secret for the Red Hat registry:
+
+[IMPORTANT]
+
+Add your service account username and password (token) generated as described in https://access.redhat.com/articles/RegistryAuthentication#creating-registry-service-accounts-6[Registry Service Accounts]
+
+[source,bash,role=execute]
+----
+oc create secret generic redhat-registry --from-literal edpm_container_registry_logins='{"registry.redhat.io": {"<username>": "<password>"}}' -n openstack
+----
+
+Deploy the Dataplane
+
+[source,bash,role=execute]
+----
+oc apply -f osp-ng-dataplane-node-set-deploy.yaml
+oc apply -f osp-ng-dataplane-deployment.yaml
+----
+
+You can view the Ansible logs while the deployment executes:
+
+[source,bash,role=execute]
+----
+oc logs -l app=openstackansibleee -f --max-log-requests 10
+----
+
+.Sample Output
+----
+(...)
+PLAY RECAP *********************************************************************
+edpm-compute-0             : ok=53   changed=26   unreachable=0    failed=0    skipped=54   rescued=0    ignored=0
+----
+
+Ctrl-C to exit.
+
+You can check the Ansible EE jobs while the deployment executes:
+
+[source,bash,role=execute]
+----
+oc get jobs -n openstack
+----
+
+.Sample Output
+----
+NAME                                                              COMPLETIONS   DURATION   AGE
+bootstrap-openstack-edpm-compute-1-openstack-edpm-compute-1       1/1           2m3s       10m
+configure-network-openstack-edpm-compute-1-openstack-edpm-compu   1/1           87s        8m55s
+configure-os-openstack-edpm-compute-1-openstack-edpm-compute-1    1/1           40s        6m42s
+download-cache-openstack-edpm-compute-1-openstack-edpm-compute    1/1           3m25s      14m
+install-certs-openstack-edpm-compute-1-openstack-edpm-compute-1   1/1           32s        4m17s
+install-os-openstack-edpm-compute-1-openstack-edpm-compute-1      1/1           39s        7m21s
+keystone-cron-29029561                                            1/1           7s         7m57s
+libvirt-openstack-edpm-compute-1-openstack-edpm-compute-1         0/1           2m5s       2m5s
+neutron-metadata-openstack-edpm-compute-1-openstack-edpm-comput   1/1           45s        2m50s
+ovn-openstack-edpm-compute-1-openstack-edpm-compute-1             1/1           54s        3m44s
+reboot-os-openstack-edpm-compute-1-openstack-edpm-compute-1       1/1           76s        5m33s
+run-os-openstack-edpm-compute-1-openstack-edpm-compute-1          1/1           20s        5m53s
+ssh-known-hosts-openstack-edpm-compute-1                          1/1           9s         6m2s
+validate-network-openstack-edpm-compute-1-openstack-edpm-comput   1/1           7s         7m280s
+----
+
+Verify that the data plane is deployed.
+
+NOTE: This takes several minutes.
+
+[source,bash,role=execute]
+----
+oc get openstackdataplanedeployment -n openstack
+----
+
+Repeat the query until you see the following:
+
+.Sample Output
+----
+NAME                  STATUS   MESSAGE
+openstack-edpm-compute-1   ["openstack-edpm-compute-1"]   True     Setup Complete
+----
+
+[source,bash,role=execute]
+----
+oc get openstackdataplanenodeset -n openstack
+----
+
+Repeat the query until you see the following:
+
+.Sample Output
+----
+NAME                       STATUS   MESSAGE
+openstack-edpm-compute-1   True     NodeSet Ready
+----

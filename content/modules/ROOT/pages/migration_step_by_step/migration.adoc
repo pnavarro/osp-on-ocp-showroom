@@ -1,0 +1,14 @@
+= Vmware to RHOSO VM migration using Red Hat OpenStack Vmware Migration Kit
+
+In this lab, you will use the following infrastructure:
+
+* A 3 OCP compact cluster with 3 nodes 4.16 OCP cluster
+* A bastion host to access to the OCP environment
+* A RHEL 9.4 virtualised compute host
+* A vcenter environment
+
+== Before you start
+
+Make sure that you have NOT enabled the flag "Deploy RHOSO and VMware Migration Toolkit automatically" when deploying the catalog item in demo.redhat.com before starting the workshop.
+
+*Be sure to review all commands carefully both for functionality and syntax!*

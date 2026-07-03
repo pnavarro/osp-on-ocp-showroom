@@ -123,7 +123,7 @@ Set up variables for the new VM (run this command block first):
 GUID='{guid}'
 PUBKEY_FILE="/home/lab-user/.ssh/{guid}key.pub"
 PUBKEY="$(< "$PUBKEY_FILE")"
-VM_SOURCE="haproxy-{guid}"
+VM_SOURCE="database-{guid}"
 VM_NAME="rhel4cbt-{guid}"
 ----
 
@@ -133,29 +133,6 @@ Create and configure the VM (run this command block second):
 
 [source,bash,subs="none", role=execute]
 ----
-FOLDER="ocpvirt-$GUID"
-
-# Determine the datacenter from the source VM
-GOVC_DATACENTER=$(./govc find / -type m -name "$VM_SOURCE" | awk -F/ 'NF>1 {print $2; exit}')
-
-if [ -z "$GOVC_DATACENTER" ]; then
-  echo "Could not determine datacenter for VM source: $VM_SOURCE"
-  exit 1
-fi
-
-export GOVC_DATACENTER
-
-# Set datastore based on datacenter
-case "$GOVC_DATACENTER" in
-  RS01) export GOVC_DATASTORE='workload_share_kc7AL' ;;
-  RS00) export GOVC_DATASTORE='workload_share_QHFNI' ;;
-  *)
-    echo "Unsupported datacenter: $GOVC_DATACENTER"
-    exit 1
-    ;;
-esac
-
-# Prepare cloud-init user data
 USERDATA=$(printf '%s\n' \
   '#cloud-config' \
   'disable_root: false' \
@@ -174,24 +151,18 @@ METADATA='{}'
 USERDATA_B64=$(printf "%s" "$USERDATA" | base64 | tr -d '\n')
 METADATA_B64=$(printf "%s" "$METADATA" | base64 | tr -d '\n')
 
-# Clone the VM from template
-./govc vm.clone -vm="$VM_SOURCE" -folder="$FOLDER" -on=false -annotation='Created for CBT migration demo' "$VM_NAME"
+govc vm.change -vm "$VM_SOURCE" -name "$VM_NAME"
 
-# Enable Changed Block Tracking on the VM and its disk
 ./govc vm.change -vm "$VM_NAME" -e="ctkEnabled=TRUE"
 ./govc vm.change -vm "$VM_NAME" -e="scsi0:0.ctkEnabled=TRUE"
 
-# Inject cloud-init configuration
 ./govc vm.change -vm "$VM_NAME" \
   -e "guestinfo.userdata=${USERDATA_B64}" \
   -e "guestinfo.userdata.encoding=base64" \
   -e "guestinfo.metadata=${METADATA_B64}" \
   -e "guestinfo.metadata.encoding=base64"
 
-# Power on the VM
 ./govc vm.power -on "$VM_NAME"
-
-echo "VM $VM_NAME created successfully with CBT enabled"
 ----
 
 **Expected output**:

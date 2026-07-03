@@ -1,0 +1,330 @@
+= Seed now, cut over later: VM migration with minimal downtime with Ansible Automation Platform
+
+In this chapter, you will learn how to seed a virtual machine with Ansible Automation Platform using a two-phase workflow: an incremental sync (seeding) that can run during maintenance windows with no workload impact, and a final cutover that runs in a separate maintenance window when the tenant accepts an outage.
+
+== Why use a two-phase seeding and cutover?
+
+A data-seeding strategy decouples virtual machine disk data transfer from service downtime. It transforms migration from a single-event risk into a multi-stage, controlled process using VMware's Changed Block Tracking (CBT).
+
+*The problem:* Moving a large VM (for example, 5 TB at 1 Gbps) can take many hours. Standard maintenance windows are often only a few hours. Running a full migration in one window is impossible or very risky.
+
+*The solution:* Seed most of the data in advance while the VM is still running. The toolkit copies disk data using CBT; the source VM stays live and the workload is unaffected. You can run this phase once or repeat it in multiple maintenance windows. The final cutover then syncs only the *delta* (changes since the last sync) and performs conversion; downtime drops from hours to minutes.
+
+*Phase 1 — Initial or incremental sync (repeatable):*
+
+* Performs disk copy using CBT; skips guest conversion.
+* Source VM remains running; no impact to the workload.
+* Use: `cbt_sync: true`, `cutover: false`.
+
+*Final phase — Cutover:*
+
+* Performs final delta sync (optional) and guest conversion (e.g. virtio drivers for Windows).
+* Windows VMs are powered off for conversion; tenant has an outage.
+* Use: `cbt_sync: true` (or `false` to skip delta sync), `cutover: true`.
+
+In this lab you will create a *workflow* with two job templates (Seeding and Cutover) and an approval step so that the cutover runs only after explicit approval, simulating real maintenance windows.
+
+== Creating the virtual machine to be migrated
+
+In the current vcenter environment, there is no virtual machine with CBT enabled. You will create a new virtual machine with CBT enabled. 
+
+In the bastion, we will be using the `govc` command to create the virtual machine. First install it in the bastion:
+[source,bash,role=execute]
+----
+curl -L -o govc.tar.gz https://github.com/vmware/govmomi/releases/latest/download/govc_Linux_x86_64.tar.gz
+tar -xzf govc.tar.gz
+----
+
+Then set the environment variables for the `govc` command:
+[source,bash,role=execute,subs=attributes]
+----
+export GOVC_URL='{vcenter_console}'
+export GOVC_USERNAME='{vcenter_full_user}'
+export GOVC_PASSWORD='{vcenter_password}'
+export GOVC_INSECURE=true
+export GOVC_NETWORK='segment-migrating-to-ocpvirt'
+----
+
+Create the virtual machine, inject the cloud-init data and power on the virtual machine, root password is `redhat`:
+
+Set the GUID and read the public key (run this first):
+[source,bash,role=execute,subs=attributes]
+----
+GUID='{guid}'
+PUBKEY_FILE="/home/lab-user/.ssh/{guid}key.pub"
+PUBKEY="$(< "$PUBKEY_FILE")"
+VM_SOURCE="database-{guid}"
+VM_NAME="rhel4cbt-{guid}"
+----
+
+Create the VM with cloud-init and power it on (run this second):
+[source,bash,role=execute,subs=none]
+----
+USERDATA=$(printf '%s\n' \
+  '#cloud-config' \
+  'disable_root: false' \
+  'ssh_pwauth: true' \
+  '' \
+  'chpasswd:' \
+  '  list: |' \
+  '    root:redhat' \
+  '  expire: false' \
+  '' \
+  'ssh_authorized_keys:' \
+  "  - $PUBKEY" \
+)
+
+METADATA='{}'
+USERDATA_B64=$(printf "%s" "$USERDATA" | base64 | tr -d '\n')
+METADATA_B64=$(printf "%s" "$METADATA" | base64 | tr -d '\n')
+
+govc vm.change -vm "$VM_SOURCE" -name "$VM_NAME"
+
+./govc vm.change -vm "$VM_NAME" -e="ctkEnabled=TRUE"
+./govc vm.change -vm "$VM_NAME" -e="scsi0:0.ctkEnabled=TRUE"
+
+./govc vm.change -vm "$VM_NAME" \
+  -e "guestinfo.userdata=${USERDATA_B64}" \
+  -e "guestinfo.userdata.encoding=base64" \
+  -e "guestinfo.metadata=${METADATA_B64}" \
+  -e "guestinfo.metadata.encoding=base64"
+
+./govc vm.power -on "$VM_NAME"
+----
+
+== Creating the Seeding Job Template
+
+== Preparing the Bastion
+
+In the bastion, create the folder to store the ansible variables:
+
+[source,bash,role=execute]
+----
+cd
+mkdir -p /home/lab-user/os-migrate-env
+----
+
+Run the following commands to configure OpenStack CLI access:
+
+[source,bash,role=execute]
+----
+oc project openstack
+alias openstack="oc exec -t openstackclient -- openstack"
+----
+
+Retrieve necessary OpenStack parameters:
+
+[source,bash,role=execute]
+----
+SECURITY_GROUP_ID=$(openstack security group list | awk '/ basic / {print $2}')
+PROJECT_ID=$(openstack project list | grep ' admin ' | awk '{print $2}')
+AUTH_URL=$(openstack endpoint list --service identity --interface public -c URL -f value)
+----
+
+Create the `/home/lab-user/os-migrate-env/os_migrate_for_aap_seeding.yaml` file:
+
+[source,bash,role=execute,subs=attributes]
+----
+cat << EOF > /home/lab-user/os-migrate-env/os_migrate_for_aap_seeding.yaml
+os_migrate_tear_down: false
+import_workloads_vmware_insecure: true
+import_workloads_openstack_insecure: true
+openstack_insecure: true
+# osm working directory:
+runner_from_aee: true
+os_migrate_vmw_data_dir: /tmp/os-migrate
+copy_openstack_credentials_to_conv_host: false
+
+# Re-use an already deployed conversion host:
+already_deploy_conversion_host: true
+
+# If no mapped network, set the OpenStack network:
+openstack_private_network: private
+
+# Security groups for the instance:
+security_groups: ${SECURITY_GROUP_ID}
+use_existing_flavor: false
+
+# Network settings for OpenStack:
+os_migrate_create_network_port: true
+copy_metadata_to_conv_host: true
+used_mapped_networks: false
+import_workloads_vmware_insecure: true
+os_migrate_configure_network: true
+
+vms_list:
+  - rhel4cbt-{guid}
+
+# Phase 1: Incremental sync only (no cutover). Source VM stays running.
+cbt_sync: true
+cutover: false
+
+# VMware parameters:
+vcenter_hostname: {vcenter_console}
+vcenter_username: {vcenter_full_user}
+vcenter_password: {vcenter_password}
+vcenter_datacenter: RS01
+
+os_cloud_environ: demo.redhat.com
+dst_cloud:
+  auth:
+    auth_url: ${AUTH_URL}
+    username: admin
+    project_id: ${PROJECT_ID}
+    project_name: admin
+    user_domain_name: Default
+    password: openstack
+  region_name: regionOne
+  interface: public
+  insecure: true
+  openstack_insecure: true
+  identity_api_version: 3
+EOF
+----
+
+== Configuring the Seeding Job Template
+
+1. From the navigation panel, go to *Automation Execution* → *Templates*.
+2. Click *Create Template* → *Create Job Template* and set the following parameters:
+   * **Name:** VM Seeding (Incremental Sync)
+   * **Inventory:** Conversion Host Inventory
+   * **Project:** vmware migration toolkit project
+   * **Playbook:** `playbooks/migration.yml`
+   * **Execution Environment:** VMware Migration toolkit execution environment
+   * **Credentials:** Bastion key
+   * **Extra Variables:** Copy the content of `/home/lab-user/os-migrate-env/os_migrate_for_aap_seeding.yaml` from the bastion (it already includes `cbt_sync: true` and `cutover: false`)
+3. Click *Create Job Template*.
+
+== Creating the Cutover Job Template
+
+The cutover job runs the final sync (optional delta) and guest conversion. The source VM will be powered off for conversion; plan this for a maintenance window when the tenant accepts an outage.
+
+== Cutover extra variables
+
+Create a second variables file on the bastion for the cutover job:
+
+[source,bash,role=execute,subs=attributes]
+----
+sed 's/cutover: false/cutover: true/' \
+  /home/lab-user/os-migrate-env/os_migrate_for_aap_seeding.yaml \
+  > /home/lab-user/os-migrate-env/os_migrate_for_aap_cutover.yaml
+----
+
+This file is identical to the seeding file except `cutover: true`. You can optionally set `cbt_sync: false` in the cutover file if you do not want a final delta sync (only conversion).
+
+== Configuring the Cutover Job Template
+
+1. From the navigation panel, go to *Automation Execution* → *Templates*.
+2. Click *Create Template* → *Create Job Template* and set the following parameters:
+   * **Name:** VM Cutover (Final Cutover)
+   * **Inventory:** Conversion Host Inventory
+   * **Project:** vmware migration toolkit project
+   * **Playbook:** `playbooks/migration.yml`
+   * **Execution Environment:** VMware Migration toolkit execution environment
+   * **Credentials:** Bastion key
+   * **Extra Variables:** Copy the content of `/home/lab-user/os-migrate-env/os_migrate_for_aap_cutover.yaml` from the bastion
+3. Click *Create Job Template*.
+
+== Creating the Workflow Job Template
+
+The workflow chains the two phases and adds an approval step so that the cutover runs only after explicit approval. This simulates:
+
+* **Maintenance window 1 (no impact):** Run the seeding job one or more times. The source VM stays up; only disk data is copied via CBT.
+* **Approval:** A designated user approves that the tenant is ready for outage.
+* **Maintenance window 2 (outage):** Run the cutover job. The VM is converted and migrated; the tenant has an outage for the duration of the cutover.
+
+== Building the workflow
+
+1. From the navigation panel, go to *Automation Execution* → *Templates*.
+2. Click *Create Template* → *Create Workflow Job Template* and set the following parameters:
+   * **Name:** VM Migration — Seeding and Cutover
+   * **Inventory:** Conversion Host Inventory
+3. Click *Create Workflow Job Template*.
+4. The workflow visualizer opens. Build the workflow as follows:
+
+*Add the Seeding job node:*
+
+. Click *Add Step* (or the *+* on the start node).
+. Node type: Select *Job Template*.
+. Choose *VM Seeding (Incremental Sync)*.
+. Optionally set a description (e.g. "Incremental sync in maintenance window — no workload impact").
+. Click Next and it will move to the the review step.
+. Click Finish to save the node. This is the first step of the workflow.
+
+*Add the Approval node:*
+
+. Click the 3 vertical dots on the *VM Seeding (Incremental Sync)* node click on *Add Step and link*.
+. Node type: Select *Approval*.
+. Name: "Approve cutover".
+. Description: "Confirm tenant is in maintenance window and ready for outage".
+. Status: "Run on Success".
+. Click Next and it will move to the the review step.
+. Click Finish to save the node.
+
+*Add the Cutover job node:*
+
+. Click the 3 vertical dots on the *Approval* node.
+. Node type: Select *Job Template*.
+. Choose *VM Cutover (Final Cutover)*.
+. Optionally set a description (e.g. "Final sync and conversion — tenant outage").
+. Click Next and it will move to the the review step.
+. Click Finish to save the node.
+
+Finally, save the workflow.
+
+The workflow is: *Start* → *VM Seeding (Incremental Sync)* → *Approval* → *VM Cutover (Final Cutover)* → *Success*.
+
+*Optional:* You can run the seeding template on its own multiple times (outside the workflow) during different maintenance windows, then run the full workflow when you are ready so that the workflow runs one more seeding, then waits for approval, then runs cutover. Alternatively, run the workflow once: the first run does the initial seeding, then after approval the cutover runs.
+
+== Running the Seeding and Cutover Workflow
+
+*Running the full workflow (recommended for the lab):*
+
+1. From the navigation panel, go to *Automation Execution* → *Templates*.
+2. Locate the *VM Migration — Seeding and Cutover* workflow template.
+3. Click the *rocket icon* to launch the workflow.
+4. The *VM Seeding (Incremental Sync)* job runs first. Wait for it to complete (this simulates a maintenance window with no impact to the workload). It should take around 4 minutes to complete.
+5. The workflow then pauses at the *Approval* node.
+6. Re-run *VM Migration — Seeding and Cutover* workflow template clicking on the *rocket icon* again, that simulates a second maintenance window with no impact to the workload.
+7. The workflow then pauses at the *Approval* node.
+8. Go to *Automation Execution* → *Jobs* (or *Workflow Jobs*), open the running workflow job, and approve the approval step.
+9. After approval, the *VM Cutover (Final Cutover)* job runs. This simulates the maintenance window where the tenant has an outage. Wait for it to complete. It should take around 10 minutes to complete.
+
+*Running only the seeding job (optional):* Go to *Templates* and launch *VM Seeding (Incremental Sync)* directly. You can run it multiple times in different maintenance windows to refresh the copied data; each run syncs only changes (CBT). When ready, run the full workflow to perform approval and cutover, or run *VM Cutover (Final Cutover)* alone if you have already seeded and only need the final step.
+
+Note: The VM cutover would take around 10 minutes to complete.
+
+=== Access to the migrated virtual machine
+
+From the bastion, attach a floating IP to the migrated virtual machine:
+
+[source,bash,role=execute,subs=attributes]
+----
+openstack floating ip create public
+openstack server add floating ip rhel4cbt_{guid} {FLOATING_IP}
+----
+
+From the bastion, access to the migrated virtual machine:
+
+[source,bash,role=execute,subs=attributes]
+----
+ssh -i /home/lab-user/.ssh/{guid}key.pem root@{FLOATING_IP}
+----
+
+=== Cleanup the virtual machine in RHOSO before the next lab
+
+Cleanup the virtual machine in RHOSO:
+
+[source,bash,role=execute,subs=attributes]
+----
+openstack server delete rhel4cbt_{guid}
+openstack volume delete rhel4cbt_{guid}-2000
+openstack port delete rhel4cbt_{guid}-NIC-0-VLAN-private
+----
+
+=== Destroy the virtual machine in vCenter
+
+[source,bash,role=execute]
+----
+./govc vm.destroy rhel4cbt-{guid}
+----

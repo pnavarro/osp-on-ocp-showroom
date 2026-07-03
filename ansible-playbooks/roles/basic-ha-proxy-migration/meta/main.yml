@@ -1,0 +1,5 @@
+---
+# This role expects configure-aap-api to have run first (same play or earlier).
+# It uses aap_controller_url, aap_api_token, and assumes credentials, inventory,
+# project, and execution environment exist in AAP. No dependency is declared so
+# the playbook can list both roles explicitly: configure-aap-api, then basic-ha-proxy-migration.

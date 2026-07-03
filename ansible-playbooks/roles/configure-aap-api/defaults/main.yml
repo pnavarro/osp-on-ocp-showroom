@@ -1,0 +1,4 @@
+---
+# VMware migration toolkit project (Git) – override via play vars or vars_files
+vmware_migration_kit_scm_url: "https://github.com/os-migrate/vmware-migration-kit"
+vmware_migration_kit_scm_branch: "stable"

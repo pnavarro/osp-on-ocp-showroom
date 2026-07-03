@@ -1,0 +1,26 @@
+= Red Hat Openstack Services on OpenShift Installation - Connected environment
+
+In this lab, you will use the following infrastructure:
+
+* A 3 OCP compact controller/worker nodes 4.16 OCP cluster
+* A bastion host to access to the OCP environment
+* A RHEL 9.4 virtualised compute host
+
+In this lab, you will cover the following topics:
+
+* Perform Prerequisite Operations
+* Install the Red Hat OpenStack Platform Service Operators
+* Configure Secure Access for OpenStack Services
+* Prepare OCP for OpenStack Network Isolation
+* Configure the NFS server
+* Create the Control Plane
+* Create the Data plane
+* Access OpenStack
+* Enable the Orchestratation Service - Heat
+* Enable the Object Storage Service - Swift
+* Validate that services enabled
+
+Within the lab environment, you will be able to copy and paste the specified commands into the CLI.
+For some steps you may also need to edit some of the commands from the  instructions.
+
+*Be sure to review all commands carefully both for functionality and syntax!*

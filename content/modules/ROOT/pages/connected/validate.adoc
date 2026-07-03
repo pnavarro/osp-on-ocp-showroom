@@ -1,0 +1,126 @@
+# Validate that Orchestration Service and Object storage service are enabled
+
+## Validate the Orchestration service
+
+. From the bastion, copy the heat template *servers_with_cinder.yaml* into the openstackclient pod :
++
+[source,bash,role=execute,subs=attributes]
+----
+cd /home/lab-user/labrepo/content/files
+oc cp servers_with_cinder.yaml openstack/openstackclient:/home/cloud-admin/.
+----
+
+. Access to the openstackclient pod:
++
+[source,bash,role=execute,subs=attributes]
+----
+oc rsh -n openstack openstackclient
+----
+
+. Store private network and subnetwork in bash environmental variables
++
+[source,bash,role=execute,subs=attributes]
+----
+PRIVATE_NETWORK_ID=$(openstack network list -f value -c ID -c Name | awk '$2 == "private" {print $1}')
+PRIVATE_SUBNET_ID=$(openstack subnet list -f value -c ID -c Name | awk '$2 == "private-net" {print $1}')
+----
+
+. Create a heat stack consisting of two servers to an existing Neutron network
++
+[source,bash,role=execute,subs=attributes]
+----
+openstack stack create -t servers_with_cinder.yaml --parameter key_name=default --parameter image=cirros --parameter flavor=tiny --parameter net_id=$PRIVATE_NETWORK_ID --parameter subnet_id=$PRIVATE_SUBNET_ID servers_with_volumes
+----
+
+. List the stack to check if the stack deplyment is completed
++
+[source,bash,role=execute,subs=attributes]
+----
+openstack stack list
+----
+
+.Sample Output
+----
++--------------------------------------+----------------------+----------------------------------+-----------------+----------------------+--------------+
+| ID                                   | Stack Name           | Project                          | Stack Status    | Creation Time        | Updated Time |
++--------------------------------------+----------------------+----------------------------------+-----------------+----------------------+--------------+
+| b2b569f6-bb22-402a-b0a8-dcdc8a250a5d | servers_with_volumes | 42538f9216b749e1943f040735c2ce24 | CREATE_COMPLETE | 2025-03-12T17:44:20Z | None         |
++--------------------------------------+----------------------+----------------------------------+-----------------+----------------------+--------------+
+----
+
+. As a result of the stack 2 servers with 1 volume attached to one of the virtual machines are created
++
+[source,bash,role=execute,subs=attributes]
+----
+openstack server list
+openstack volume list
+----
+
+.Sample Output
+----
++--------------------------------------+-------------+--------+---------------------------------------+--------+--------+
+| ID                                   | Name        | Status | Networks                              | Image  | Flavor |
++--------------------------------------+-------------+--------+---------------------------------------+--------+--------+
+| b48f087f-aba0-4e5b-8c27-24b19be571fc | Server2     | ACTIVE | private=192.168.100.232               | cirros | tiny   |
+| bfcd96a4-cb25-42fe-b989-87dd71286f68 | Server1     | ACTIVE | private=192.168.100.108               | cirros | tiny   |
+| 90e1f115-1d22-4a30-94ad-e9d449555675 | test-server | ACTIVE | private=172.21.0.200, 192.168.100.107 | cirros | tiny   |
++--------------------------------------+-------------+--------+---------------------------------------+--------+--------+
++--------------------------------------+--------------------------------------------+--------+------+----------------------------------+
+| ID                                   | Name                                       | Status | Size | Attached to                      |
++--------------------------------------+--------------------------------------------+--------+------+----------------------------------+
+| 66796c80-9a4f-4c52-896e-25bdc079e2ef | servers_with_volumes-volume_1-jlaud3og4jko | in-use |   10 | Attached to Server1 on /dev/vdb  |
++--------------------------------------+--------------------------------------------+--------+------+----------------------------------+
+----
+
+## Validate the Object Storage Service
+
+. From the bastion, access to the openstackclient pod:
++
+[source,bash,role=execute,subs=attributes]
+----
+oc rsh -n openstack openstackclient
+----
+
+. Verify that you are able to upload and download objects:
++
+[source,bash,role=execute]
+----
+openstack container create test
+----
+
+.Sample Output
+----
++---------------------------------------+-----------+------------------------------------+
+| account                               | container | x-trans-id                         |
++---------------------------------------+-----------+------------------------------------+
+| AUTH_4d9be0a9193e4577820d187acdd2714a | test      | txe5f9a10ce21e4cddad473-0065ce41b9 |
++---------------------------------------+-----------+------------------------------------+
+----
+
+. Create a test object:
++
+[source,bash,role=execute]
+----
+openstack object create test --name obj <(echo "Hello World!")
+----
+
+.Sample Output
+----
++--------+-----------+----------------------------------+
+| object | container | etag                             |
++--------+-----------+----------------------------------+
+| obj    | test      | d41d8cd98f00b204e9800998ecf8427e |
++--------+-----------+----------------------------------+
+----
+
+. Final a test to download an object from the container:
++
+[source,bash,role=execute]
+----
+openstack object save test obj --file -
+----
+
+.Sample Output
+----
+Hello World!
+----

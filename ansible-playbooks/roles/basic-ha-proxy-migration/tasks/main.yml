@@ -1,0 +1,74 @@
+---
+# Basic HAproxy VM Migration job template
+# Reads migration config (os_migrate_for_aap.yaml) and creates the "HAproxy VM Migration"
+# job template in AAP. Intended to run after configure-aap-api (credentials, inventory,
+# project, and execution environment must exist).
+
+# Read migration configuration for job template extra vars
+- name: Get home directory
+  ansible.builtin.shell: echo $HOME
+  register: home_dir
+  changed_when: false
+
+- name: Check if migration configuration file exists
+  ansible.builtin.stat:
+    path: "{{ home_dir.stdout }}/{{ migration_config_dir }}/os_migrate_for_aap.yaml"
+  register: migration_config_file
+
+- name: Read migration configuration file
+  ansible.builtin.slurp:
+    src: "{{ home_dir.stdout }}/{{ migration_config_dir }}/os_migrate_for_aap.yaml"
+  register: migration_config_content
+  when: migration_config_file.stat.exists
+
+- name: Parse migration configuration
+  ansible.builtin.set_fact:
+    migration_extra_vars: "{{ (migration_config_content.content | b64decode | from_yaml) if migration_config_file.stat.exists else {} }}"
+
+# Create Job Template
+- name: Create HAproxy VM Migration Job Template
+  awx.awx.job_template:
+    name: "HAproxy VM Migration"
+    description: "Migrate HAproxy VMs from VMware to RHOSO"
+    job_type: "run"
+    inventory: "Conversion Host Inventory"
+    project: "vmware migration toolkit project"
+    playbook: "playbooks/migration.yml"
+    execution_environment: "VMware Migration toolkit execution environment"
+    credentials:
+      - "Bastion key"
+    extra_vars: "{{ migration_extra_vars }}"
+    ask_variables_on_launch: true
+    state: present
+    controller_host: "{{ aap_controller_url }}"
+    controller_oauthtoken: "{{ aap_api_token }}"
+    validate_certs: false
+  register: job_template_result
+
+- name: Display job template creation result
+  ansible.builtin.debug:
+    msg: |
+      {% if job_template_result.failed | default(false) %}
+      ❌ Job template creation failed: {{ job_template_result.msg | default('Unknown error') }}
+
+      Please check:
+      - Project sync status in AAP UI
+      - Playbook exists at playbooks/migration.yml in the GitHub repository
+      {% else %}
+      ✅ Job template "HAproxy VM Migration" created successfully!
+         ID: {{ job_template_result.id | default('already exists') }}
+      {% endif %}
+
+- name: Display HAproxy migration scenario next steps
+  ansible.builtin.debug:
+    msg: |
+      ========================================
+      HAproxy VM Migration scenario ready
+      ========================================
+      1. Access AAP Dashboard: {{ aap_gateway_url | default('(set by configure-aap-api)') }}
+         Username: admin / Password: {{ aap_admin_password | default('(from AAP secret)') }}
+      2. Navigate to: Resources → Templates → "HAproxy VM Migration"
+      3. Click "Launch" 🚀 to start the VM migration
+      Migration target: {{ vms_list[0].name | default(vms_to_migrate[0] | default('VM in extra_vars')) }}
+      ========================================
+  when: not (job_template_result.failed | default(false))

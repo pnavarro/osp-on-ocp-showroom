@@ -1,0 +1,42 @@
+= Access Your Lab Environment
+
+== Access the bastion host
+
+. Access to the bastion executing the following command: 
++
+[source,bash,role=execute,subs=attributes]
+----
+ssh {bastion_ssh_user_name}@{bastion_public_hostname} -p {bastion_ssh_port} 
+----
++
+SSH password is `{bastion_ssh_password}`. The uuid of your lab is: `{guid}`
+. Optionally copy your public SSH key to the bastion allowing you to authenticate with the server without entering a password every time you connect: 
++
+[source,bash,role=execute,subs=attributes]
+----
+ssh-copy-id -p {bastion_ssh_port} {bastion_ssh_user_name}@{bastion_public_hostname} 
+----
+
+== Credentials for Ansible Automation Platform and OpenShift Console
+
+Your OpenShift cluster console is available {openshift_cluster_console_url}[here^].
+
+Your local admin login is available with the following credentials:
+
+* *User:* `{openshift_cluster_admin_username}`
+* *Password:* `{openshift_cluster_admin_password}`
+
+You will then be presented with a login screen where you can copy/paste your credentials.
+
+image::01-openshift_login.png[title="OpenShift Login", link=self, window=blank, width=100%]
+
+Your Ansible Automation Platform console is available {aap_controller_web_url}[here^].
+
+Your admin login is available with the following credentials:
+
+* *User:* `{aap_controller_admin_user}`
+* *Password* `{aap_controller_admin_password}`
+
+image::02-aap_login.png[title="AAP Login", link=self, window=blank, width=100%]
+
+Use this opportunity to open and log into both consoles to prepare for the lab.

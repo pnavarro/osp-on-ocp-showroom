@@ -1,0 +1,69 @@
+= Providing Secure Access to the Red Hat OpenStack Platform Services
+
+We will be utilizing a preconfigured yaml file (`files/osp-ng-ctlplane-secret.yaml`) to create a seperate base64 password for heat and one for the remaining services.
+
+Make sure that you are in the *openstack* namespace:
+
+[source,bash,role=execute]
+----
+oc project openstack
+----
+
+Create the osp-secret Secret:
+
+[source,bash,role=execute]
+----
+cd /home/lab-user/labrepo/content/files
+oc create -f osp-ng-ctlplane-secret.yaml
+----
+
+Create the libvirt Secret:
+
+[source,bash,role=execute]
+----
+oc create -f osp-ng-libvirt-secret.yaml
+----
+
+== Prepare the secret to place the NFS server connection used by Cinder
+
+[source,bash,role=execute]
+----
+oc create secret generic cinder-nfs-config --from-file=nfs-cinder-conf
+----
+
+== Create secret for the subcription manager credentials
+
+Create a secret for the subscription manager:
+
+[IMPORTANT]
+
+Add your username and password
+
+[source,bash,role=execute]
+----
+oc create secret generic subscription-manager \
+--from-literal rhc_auth='{"login": {"username": "your_username", "password": "your_password"}}'
+EOF
+----
+
+Create a secret for the Red Hat registry:
+
+[IMPORTANT]
+
+Add your username and password
+
+[source,bash,role=execute]
+----
+oc create secret generic redhat-registry --from-literal edpm_container_registry_logins='{"registry.redhat.io": {"<username>": "<password>"}}' -n openstack
+----
+
+== Configure the ansible dataplane secrets to access
+
+From the bastion server, create Secret for ansible connection and nova migration of virtual machines
+
+[source,bash,role=execute,subs=attributes]
+----
+oc create secret generic dataplane-ansible-ssh-private-key-secret --save-config --dry-run=client --from-file=authorized_keys=/home/lab-user/.ssh/{guid}key.pub --from-file=ssh-privatekey=/home/lab-user/.ssh/{guid}key.pem --from-file=ssh-publickey=/home/lab-user/.ssh/{guid}key.pub -n openstack -o yaml | oc apply -f-
+ssh-keygen -f ./id -t ecdsa-sha2-nistp521 -N ''
+oc create secret generic nova-migration-ssh-key --from-file=ssh-privatekey=id --from-file=ssh-publickey=id.pub -n openstack -o yaml | oc apply -f-
+----

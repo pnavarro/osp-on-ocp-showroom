@@ -1,0 +1,93 @@
+---
+# Apply migration scenario(s) – create job templates in AAP
+# Run after AAP base configuration (configure-aap-api). Use deploy-migration-scenarios.sh
+# or run directly with the same inventory and vars as migration-setup.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts-<guid>.yml migration-scenarios.yml -e @credentials.yml
+#   ./deploy-migration-scenarios.sh --inventory inventory/hosts-<guid>.yml --credentials credentials.yml
+#
+# Control which scenarios run via vars/migration.yml:
+#   migration_scenarios: [basic_ha_proxy_migration]   # default
+#   migration_scenarios: [basic_ha_proxy_migration, other_scenario]
+
+- name: Get AAP connection info (required for scenario roles)
+  hosts: bastion
+  become: false
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+    - vars/migration.yml
+  tasks:
+    - name: Get AAP admin password from secret
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ aap_instance_name }}-admin-password"
+        namespace: "{{ aap_namespace }}"
+      register: aap_admin_secret
+
+    - name: Decode AAP admin password
+      ansible.builtin.set_fact:
+        aap_admin_password: "{{ aap_admin_secret.resources[0].data.password | b64decode }}"
+      when: aap_admin_secret.resources | length > 0
+
+    - name: Get AAP Controller route
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        namespace: "{{ aap_namespace }}"
+      register: aap_routes
+
+    - name: Extract AAP Controller URL
+      ansible.builtin.set_fact:
+        aap_controller_url: "https://{{ (aap_routes.resources | selectattr('metadata.name', 'match', '.*controller.*') | list | first).spec.host }}"
+      when: aap_routes.resources | length > 0
+
+    - name: Extract AAP Gateway URL
+      ansible.builtin.set_fact:
+        aap_gateway_url: "https://{{ (aap_routes.resources | selectattr('metadata.name', 'equalto', aap_instance_name) | list | first).spec.host }}"
+      when: aap_routes.resources | length > 0
+
+    - name: Wait for AAP Controller API to be ready
+      ansible.builtin.uri:
+        url: "{{ aap_controller_url }}/api/v2/ping/"
+        method: GET
+        validate_certs: false
+        status_code: 200
+      register: aap_ping
+      until: aap_ping.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Create OAuth2 token via awx-manage
+      ansible.builtin.shell: |
+        oc exec -n {{ aap_namespace }} \
+          deployment/{{ aap_instance_name }}-controller-web -- \
+          awx-manage create_oauth2_token --user admin
+      register: token_result
+      changed_when: true
+
+    - name: Set aap_api_token from created token
+      ansible.builtin.set_fact:
+        aap_api_token: "{{ token_result.stdout | trim }}"
+
+- name: Apply migration scenario(s) (create job templates)
+  hosts: bastion
+  become: false
+  gather_facts: false
+  vars_files:
+    - vars/main.yml
+    - vars/migration.yml
+  tasks:
+    - name: Include migration scenario role {{ scenario }}
+      ansible.builtin.include_role:
+        name: "{{ scenario | replace('_', '-') }}"
+      loop: "{{ migration_scenarios | default([]) }}"
+      loop_control:
+        loop_var: scenario
+      when:
+        - migration_scenarios is defined
+        - migration_scenarios | length > 0
+  tags:
+    - migration-scenarios

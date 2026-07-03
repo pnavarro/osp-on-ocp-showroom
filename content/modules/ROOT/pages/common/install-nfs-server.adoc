@@ -1,0 +1,42 @@
+= Install the NFS Server in the NFS Server Node
+
+. Configure the NFS server for Glance and Cinder
+
+From the bastion, connect to the *NFS server* host and configure the networking:
+
+[source,bash,role=execute,subs=attributes]
+----
+ssh -i /home/lab-user/.ssh/{guid}key.pem cloud-user@nfsserver
+----
+
+Escalate to root:
+
+[source,bash,role=execute]
+----
+sudo -i
+----
+
+[source,bash,role=execute,subs=attributes]
+----
+mkdir -p /nfs/cinder
+mkdir -p /nfs/glance
+mkdir -p /nfs/aap
+chmod 777 /nfs/cinder
+chmod 777 /nfs/glance
+chmod 777 /nfs/aap
+
+cat << EOF > /etc/exports
+/nfs/cinder *(rw,sync,no_root_squash)
+/nfs/glance *(rw,sync,no_root_squash)
+/nfs/aap *(rw,sync,no_root_squash)
+EOF
+
+nmcli con delete 'Wired connection 1'
+nmcli con add con-name "static-eth1" ifname eth1 type ethernet ip4 172.18.0.13/24
+nmcli con up "static-eth1"
+
+systemctl start nfs-server
+systemctl enable nfs-server
+exit
+logout
+----

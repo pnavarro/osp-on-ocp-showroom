@@ -1,0 +1,170 @@
+= Access OpenStack
+
+From the *bastion server* access the openstackclient pod:
+
+[source,bash,role=execute]
+----
+oc rsh -n openstack openstackclient
+----
+
+On Control Plane verify OpenStack Services:
+
+[source,bash,role=execute]
+----
+openstack compute service list
+----
+
+.Sample Output
+----
++--------------------------------------+----------------+-------------------------------------------------------------+----------+---------+-------+----------------------------+
+| ID                                   | Binary         | Host                                                        | Zone     | Status  | State | Updated At                 |
++--------------------------------------+----------------+-------------------------------------------------------------+----------+---------+-------+----------------------------+
+| 94ce5d73-9cd6-4ad0-83bb-0f731a9418f6 | nova-conductor | nova-cell0-conductor-0                                      | internal | enabled | up    | 2025-01-27T09:56:26.000000 |
+| 801cb7ff-4b55-4535-8dab-f0a1cc12bb89 | nova-scheduler | nova-scheduler-0                                            | internal | enabled | up    | 2025-01-27T09:56:25.000000 |
+| d8ba1138-06c6-4b8d-a7d8-4c123ccaa2bf | nova-conductor | nova-cell1-conductor-0                                      | internal | enabled | up    | 2025-01-27T09:56:25.000000 |
+| f81bcf7c-7e7b-4f5a-8ee0-fdb7139baf09 | nova-compute   | edpm-compute-1.sandbox-nqfkf-ocp4-cluster.svc.cluster.local | nova     | enabled | up    | 2025-01-27T09:56:16.000000 |
++--------------------------------------+----------------+-------------------------------------------------------------+----------+---------+-------+----------------------------+
+----
+
+Verify OpenStack networks:
+
+[source,bash,role=execute]
+----
+openstack network agent list
+exit
+----
+
+.Sample Output
+----
++--------------------------------------+------------------------------+-------------------------------------------------------------+-------------------+-------+-------+----------------------------+
+| ID                                   | Agent Type                   | Host                                                        | Availability Zone | Alive | State | Binary                     |
++--------------------------------------+------------------------------+-------------------------------------------------------------+-------------------+-------+-------+----------------------------+
+| 69b4e349-8395-4259-83a2-976297b3dbf6 | OVN Controller Gateway agent | control-plane-cluster-nqfkf-2                               |                   | :-)   | UP    | ovn-controller             |
+| 002c628a-a22e-4a43-b353-e35cb35c6178 | OVN Controller Gateway agent | control-plane-cluster-nqfkf-1                               |                   | :-)   | UP    | ovn-controller             |
+| 54fab519-0539-4d7a-aa17-c37d5dbee853 | OVN Controller Gateway agent | control-plane-cluster-nqfkf-3                               |                   | :-)   | UP    | ovn-controller             |
+| 1c2d20aa-a2cb-47ca-bda3-29e3f8dee8a3 | OVN Controller agent         | edpm-compute-1.sandbox-nqfkf-ocp4-cluster.svc.cluster.local |                   | :-)   | UP    | ovn-controller             |
+| 7b027585-2587-5e20-b912-58cd97fd5763 | OVN Metadata agent           | edpm-compute-1.sandbox-nqfkf-ocp4-cluster.svc.cluster.local |                   | :-)   | UP    | neutron-ovn-metadata-agent |
++--------------------------------------+------------------------------+-------------------------------------------------------------+-------------------+-------+-------+----------------------------+
+----
+
+Map the Compute nodes to the Compute cell that they are connected to:
+
+[source,bash,role=execute]
+----
+oc rsh nova-cell0-conductor-0 nova-manage cell_v2 discover_hosts --verbose -n openstack
+----
+
+Configure the bastion with external network
+
+[source,bash,role=execute,subs=attributes]
+----
+sudo nmcli con add con-name "static-eth1" ifname eth1 type ethernet ip4 {rhoso_external_ip_bastion}/16
+sudo nmcli con up "static-eth1"
+----
+
+Access to the openstackclient pod
+
+[source,bash,role=execute]
+----
+oc rsh -n openstack openstackclient
+----
+
+Create image and flavors
+[source,bash,role=execute]
+----
+export GATEWAY=192.168.0.1
+export PUBLIC_NETWORK_CIDR=192.168.0.0/16
+export PRIVATE_NETWORK_CIDR=10.0.0.0/24
+export PUBLIC_NET_START={rhoso_public_net_start}
+export PUBLIC_NET_END={rhoso_public_net_end}
+export DNS_SERVER=8.8.8.8
+openstack flavor create --ram 512 --disk 1 --vcpu 1 --public tiny
+curl -O -L https://github.com/cirros-dev/cirros/releases/download/0.6.2/cirros-0.6.2-x86_64-disk.img
+openstack image create cirros --container-format bare --disk-format qcow2 --public --file cirros-0.6.2-x86_64-disk.img
+----
+
+Generate a keypair (Type ENTER 2 times):
+[source,bash,role=execute]
+----
+ssh-keygen -m PEM -t rsa -b 2048 -f ~/.ssh/id_rsa_pem
+----
+
+Create Network and Security for the VM
+
+[source,bash,role=execute]
+----
+openstack keypair create --public-key ~/.ssh/id_rsa_pem.pub default
+openstack security group create basic
+openstack security group rule create basic --protocol tcp --dst-port 22:22 --remote-ip 0.0.0.0/0
+openstack security group rule create --protocol icmp basic
+openstack security group rule create --protocol udp --dst-port 53:53 basic
+openstack network create --external --provider-physical-network datacentre --provider-network-type flat public
+openstack network create --internal private
+openstack subnet create public-net \
+--subnet-range $PUBLIC_NETWORK_CIDR \
+--no-dhcp \
+--gateway $GATEWAY \
+--allocation-pool start=$PUBLIC_NET_START,end=$PUBLIC_NET_END \
+--network public
+openstack subnet create private-net \
+--subnet-range $PRIVATE_NETWORK_CIDR \
+--network private
+openstack router create vrouter
+openstack router set vrouter --external-gateway public
+openstack router add subnet vrouter private-net
+----
+
+Create the Server and a Floating IP
+
+[source,bash,role=execute,subs=attributes]
+----
+openstack server create \
+    --flavor tiny --key-name default --network private --security-group basic \
+    --image cirros test-server
+openstack floating ip create public --floating-ip-addres {rhoso_conversion_host_ip}
+----
+
+Add the floating IP above to the new VM in the next step.
+
+[IMPORTANT]
+
+If you get an error saying the IP `{rhoso_conversion_host_ip}` is in use, replace it with the next one in the `openstack` commands above and below and the `ssh` right after it.
+
+[source,bash,role=execute,subs=attributes]
+----
+openstack server add floating ip test-server {rhoso_conversion_host_ip}
+exit
+----
+
+Make sure the VM is running.
+
+[source,bash,role=execute,subs=attributes]
+----
+openstack server list
+----
+
+[source,bash,role=execute,subs=attributes]
+----
+ssh cirros@{rhoso_conversion_host_ip}
+----
+[source,bash,role=execute]
+----
+exit
+----
+
+== Access Horizon
+
+From the Bastion, get the Route
+
+[source,bash,role=execute]
+----
+ROUTE=$(oc get routes horizon  -o go-template='https://{{range .status.ingress}}{{.host}}{{end}}')
+echo $ROUTE
+----
+
+.Sample Output
+----
+https://horizon-openstack.apps.86dgb.dynamic.redhatworkshops.io
+----
+
+Navigate to the url and log in as username `admin` password `openstack`

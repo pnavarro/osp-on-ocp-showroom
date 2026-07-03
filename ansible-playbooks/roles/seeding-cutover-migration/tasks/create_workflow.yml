@@ -1,0 +1,60 @@
+---
+# Create AAP Workflow Job Template: VM Seeding (Incremental Sync) → Approval → VM Cutover (Final Cutover)
+# Matches the manual steps in seeding-vm-in-maintenance-windows.adoc (Building the workflow).
+
+- name: Create VM Migration — Seeding and Cutover workflow job template
+  awx.awx.workflow_job_template:
+    name: "{{ seeding_cutover_workflow_name }}"
+    description: "Seeding (CBT sync) → Approval → Cutover (final sync and conversion). Launch for full migration in maintenance window."
+    organization: "{{ seeding_cutover_workflow_organization }}"
+    inventory: "{{ seeding_cutover_workflow_inventory }}"
+    state: present
+    destroy_current_nodes: true
+    workflow_nodes:
+      - identifier: "node_seeding"
+        unified_job_template:
+          name: "VM Seeding (Incremental Sync)"
+          type: job_template
+          organization:
+            name: "{{ seeding_cutover_workflow_organization }}"
+        related:
+          success_nodes:
+            - identifier: "node_approval"
+          failure_nodes: []
+          always_nodes: []
+      - identifier: "node_approval"
+        unified_job_template:
+          name: "{{ seeding_cutover_workflow_approval_name }}"
+          type: workflow_approval
+          description: "{{ seeding_cutover_workflow_approval_description }}"
+          timeout: "{{ seeding_cutover_workflow_approval_timeout | int }}"
+        related:
+          success_nodes:
+            - identifier: "node_cutover"
+          failure_nodes: []
+          always_nodes: []
+      - identifier: "node_cutover"
+        unified_job_template:
+          name: "VM Cutover (Final Cutover)"
+          type: job_template
+          organization:
+            name: "{{ seeding_cutover_workflow_organization }}"
+        related:
+          success_nodes: []
+          failure_nodes: []
+          always_nodes: []
+    controller_host: "{{ aap_controller_url }}"
+    controller_oauthtoken: "{{ aap_api_token }}"
+    validate_certs: false
+  register: workflow_result
+
+- name: Display workflow creation result
+  ansible.builtin.debug:
+    msg: |
+      {% if workflow_result.failed | default(false) %}
+      ❌ Workflow creation failed: {{ workflow_result.msg | default('Unknown error') }}
+      {% else %}
+      ✅ Workflow "{{ seeding_cutover_workflow_name }}" created successfully!
+         ID: {{ workflow_result.id | default('already exists') }}
+         Steps: VM Seeding (Incremental Sync) → Approve cutover → VM Cutover (Final Cutover)
+      {% endif %}
