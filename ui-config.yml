@@ -2,7 +2,7 @@
 type: showroom
 
 # Set the left column width to 30%
-default_width: 30
+default_width: 40
 # Persist the URL state so browser refresh doesn't reset the UI
 persist_url_state: true
 
@@ -11,18 +11,19 @@ view_switcher:
   default_mode: split
 
 tabs:
-  # OpenShift Console
-  - name: OpenShift Console
-    url: '{openshift_console_url}'
-
-  # Ansible Automation Platform Console
-  - name: AAP Console
-    url: '{aap_console_url}'
 
   # Bastion Terminal
   - name: Bastion
     path: /wetty
     port: 443
+
+  # OpenShift Console
+  - name: OpenShift Console
+    url: 'https://console-openshift-console.${DOMAIN}'
+
+  # Ansible Automation Platform Console
+  - name: Ansible Automation Platform
+    url: 'https://aap-aap.${DOMAIN}'
 
   # Vertical split terminals
   # - name: Bastion
