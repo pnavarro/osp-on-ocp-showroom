@@ -1,0 +1,212 @@
+= Creating the RHOSO Networks OverlayConfiguration
+
+== Creating the initial overlay
+
+Change directory to your forked gitops repo, in your bastion:
+
+[source,bash,role=execute]
+----
+cd /home/lab-user/rhoso-gitops/gitops
+----
+
+Create the environment directory store the managed cluster overlay configuration:
+
+[source,bash,role=execute]
+----
+mkdir -p environments/demo-env/networks
+----
+
+[source,bash,role=execute]
+----
+cat > environments/demo-env/networks/kustomization.yaml <<EOF
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+transformers:
+  - |-
+    apiVersion: builtin
+    kind: NamespaceTransformer
+    metadata:
+      name: notImportantHere
+      namespace: cifmw-demo
+    unsetOnly: true
+resources:
+  - networks-patches
+EOF
+----
+
+== Creating the Networks Environment Overlay
+
+Create the controlplane patches directory to store the overlays patches:
+
+[source,bash,role=execute]
+----
+mkdir -p environments/demo-env/networks/networks-patches
+----
+
+=== Configuring OpenShift Networking patches configuration
+
+==== Creating the patches configuration
+
+Create the *kustomization.yaml* for the demo-env environment overlay configuration:
+
+[source,bash,role=execute]
+----
+cat > environments/demo-env/networks/networks-patches/kustomization.yaml <<EOF
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+transformers:
+  - |-
+    apiVersion: builtin
+    kind: NamespaceTransformer
+    metadata:
+      name: notImportantHere
+      namespace: openstack
+    unsetOnly: true
+resources:
+  - ../../../../base/networks
+EOF
+----
+
+Validate the base configuration can be generated with *kustomize build*:
+
+[source,bash,role=execute]
+----
+kustomize build environments/demo-env/networks/networks-patches
+----
+
+==== Patching the NodeNetworkConfigurationPolicy
+
+Update the NodeNetworkConfigurationPolicy manifests in the base configuration, including the nodeSelector hostname.
+Use the procedure in the Preparing RHOCP with isolated network interfaces guide for the patches added to the kustomization.
+In this lab, apply the changes under `environments/demo-env/networks/` unless stated otherwise.
+
+Create the patch file for the first OpenShift worker node:
+
+[source,bash,role=execute,subs=attributes]
+----
+cat > environments/demo-env/networks/networks-patches/nnpc-patch-worker1.yaml <<'EOF'
+- op: replace
+  path: /metadata/name
+  value: "control-plane-cluster-{guid}-1"
+- op: replace
+  path: /spec/nodeSelector/kubernetes.io~1hostname
+  value: "control-plane-cluster-{guid}-1"
+- op: replace
+  path: /spec/desiredState/interfaces/3/ipv4/address/0/ip
+  value: "{rhoso_external_ip_worker_1}"
+EOF
+----
+
+Create the patch file for the second OpenShift worker node:
+
+[source,bash,role=execute,subs=attributes]
+----
+cat > environments/demo-env/networks/networks-patches/nnpc-patch-worker2.yaml <<'EOF'
+- op: replace
+  path: /metadata/name
+  value: "control-plane-cluster-{guid}-2"
+- op: replace
+  path: /spec/nodeSelector/kubernetes.io~1hostname
+  value: "control-plane-cluster-{guid}-2"
+- op: replace
+  path: /spec/desiredState/interfaces/3/ipv4/address/0/ip
+  value: "{rhoso_external_ip_worker_2}"
+EOF
+----
+
+Create the patch file for the third OpenShift worker node:
+
+[source,bash,role=execute,subs=attributes]
+----
+cat > environments/demo-env/networks/networks-patches/nnpc-patch-worker3.yaml <<'EOF'
+- op: replace
+  path: /metadata/name
+  value: "control-plane-cluster-{guid}-3"
+- op: replace
+  path: /spec/nodeSelector/kubernetes.io~1hostname
+  value: "control-plane-cluster-{guid}-3"
+- op: replace
+  path: /spec/desiredState/interfaces/3/ipv4/address/0/ip
+  value: "{rhoso_external_ip_worker_3}"
+EOF
+----
+
+Create the patch file for the OpenStack network configuration:
+
+[source,bash,role=execute,subs=attributes]
+----
+cat > environments/demo-env/networks/networks-patches/netconfig-patch.yaml <<'EOF'
+- op: replace
+  path: /spec/networks/0/dnsDomain
+  value: ctlplane.sandbox-{guid}-ocp4-cluster.svc.cluster.local
+- op: replace
+  path: /spec/networks/1/dnsDomain
+  value: internalapi.sandbox-{guid}-ocp4-cluster.svc.cluster.local
+- op: replace
+  path: /spec/networks/2/dnsDomain
+  value: tenant.sandbox-{guid}-ocp4-cluster.svc.cluster.local
+- op: replace
+  path: /spec/networks/3/dnsDomain
+  value: storage.sandbox-{guid}-ocp4-cluster.svc.cluster.local
+- op: replace
+  path: /spec/networks/4/dnsDomain
+  value: external.sandbox-{guid}-ocp4-cluster.svc.cluster.local
+EOF
+----
+
+And add the patches to the kustomization.yaml file:
+
+[source,bash,role=execute]
+----
+vim environments/demo-env/networks/networks-patches/kustomization.yaml
+----
+
+[source,bash,subs=attributes]
+----
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/networks
+
+patches:
+  - path: nnpc-patch-worker1.yaml
+    target:
+      group: nmstate.io
+      version: v1
+      kind: NodeNetworkConfigurationPolicy
+      name: osp-multi-nic-worker-ocp4-worker1
+  - path: nnpc-patch-worker2.yaml
+    target:
+      group: nmstate.io
+      version: v1
+      kind: NodeNetworkConfigurationPolicy
+      name: osp-multi-nic-worker-ocp4-worker2
+  - path: nnpc-patch-worker3.yaml
+    target:
+      group: nmstate.io
+      version: v1
+      kind: NodeNetworkConfigurationPolicy
+      name: osp-multi-nic-worker-ocp4-worker3
+  - path: netconfig-patch.yaml
+    target:
+      group: nmstate.io
+      version: v1
+      kind: NetConfig
+      name: openstacknetconfig
+
+----
+
+Validate the base configuration can be generated with *kustomize build*:
+[source,bash,role=execute]
+----
+kustomize build environments/demo-env/networks/
+----
+
+Commit the files created and push it to your github repo:
+[source,bash,role=execute]
+----
+git add .
+git commit -m "Base and demo-env environment networks"
+git push origin
+----

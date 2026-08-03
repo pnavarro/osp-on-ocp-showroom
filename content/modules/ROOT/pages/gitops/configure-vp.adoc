@@ -1,0 +1,142 @@
+= Configure Validated Patterns for RHOSO
+
+== Clone the Repositories we will use in the lab
+
+[source,bash,role=execute]
+----
+cd
+git clone https://github.com/rhpds/osp-on-ocp-showroom.git labrepo
+git clone git@github.com:validatedpatterns-sandbox/rhoso-gitops.git rhoso-gitops
+cd rhoso-gitops
+----
+
+== Configure the Validated Patterns
+
+[source,bash,role=execute]
+----
+cd rhoso-gitops
+cd overrides
+----
+
+Configure the file values-rhoso-gitops.yaml
+
+[source,bash,role=execute]
+----
+cat > values-rhoso-gitops.yaml <<EOF
+---
+# Helm values for charts/all/rhoso-gitops (child Argo CD Applications).
+applicationNamespace: openshift-gitops
+destinationServer: https://kubernetes.default.svc
+applications:
+  operator-dependencies:
+    enabled: true
+    repoURL: https://github.com/openstack-k8s-operators/gitops
+    path: example/dependencies
+    targetRevision: v0.3.1
+    syncPolicy:
+      automated: {}
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
+      syncOptions:
+        - Prune=true
+  openstack-operator:
+    enabled: true
+    repoURL: https://github.com/openstack-k8s-operators/gitops
+    path: example/openstack-operator
+    targetRevision: v0.3.1
+    syncPolicy:
+      automated: {}
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
+      syncOptions:
+        - Prune=true
+  openstack-operator-cr:
+    enabled: true
+    repoURL: https://github.com/openstack-k8s-operators/gitops
+    path: example/openstack-operator-cr
+    targetRevision: v0.3.1
+    syncPolicy:
+      automated: {}
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
+      syncOptions:
+        - Prune=true
+  openstack-secrets:
+    enabled: true
+    repoURL: https://github.com/$your_github_id/rhoso-gitops
+    path: gitops/environments/demo-env/secrets
+    targetRevision: main
+    syncWave: "-10"
+    syncPolicy:
+      automated: {}
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
+      syncOptions:
+        - Prune=true
+        - SkipDryRunOnMissingResource=true
+  openstack-networks:
+    enabled: true
+    repoURL: https://github.com/$your_github_id/rhoso-gitops
+    path: gitops/environments/demo-env/networks
+    targetRevision: main
+    syncPolicy:
+      automated: {}
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
+      syncOptions:
+        - Prune=true
+  openstack-controlplane:
+    enabled: true
+    repoURL: https://github.com/$your_github_id/rhoso-gitops
+    path: gitops/environments/demo-env/controlplane
+    targetRevision: main
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io/foreground
+    syncPolicy:
+      automated: {}
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
+      syncOptions:
+        - Prune=true
+  openstack-dataplane:
+    enabled: true
+    repoURL: https://github.com/$your_github_id/rhoso-gitops
+    path: gitops/environments/demo-env/dataplane
+    targetRevision: main
+    syncPolicy:
+      automated: {}
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
+      syncOptions:
+        - Prune=true
+EOF
+----
+

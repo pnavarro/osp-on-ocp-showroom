@@ -1,0 +1,38 @@
+include::../common/install-nfs-server.adoc[leveloffset=+1]
+
+== Login to the preprovisioned Compute and configure networking
+
+From the bastion login to the *compute01* host:
+
+[source,bash,role=execute,subs=attributes]
+----
+ssh -i /home/lab-user/.ssh/{guid}key.pem cloud-user@compute01
+----
+
+[source,bash,role=execute,subs=attributes]
+----
+sudo hostnamectl set-hostname edpm-compute-1.sandbox-{guid}-ocp4-cluster.svc.cluster.local
+sudo nmcli con add con-name "static-eth1" ifname eth1 type ethernet ip4 172.22.0.100/24 ipv4.dns "172.22.0.89"
+sudo nmcli con up "static-eth1"
+sudo nmcli con add type ethernet ifname eth0 con-name eth0-dhcp ipv4.method auto ipv6.method ignore
+sudo nmcli con up eth0-dhcp
+sudo nmcli con mod eth0-dhcp connection.stable-id "user-set"
+----
+
+And log off VM
+
+[source,bash,role=execute]
+----
+logout
+----
+
+== Install kustomize
+
+In the bastion, execute:
+
+[source,bash,role=execute]
+----
+wget https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.6.0/kustomize_v5.6.0_linux_amd64.tar.gz
+tar -xvzf kustomize_v5.6.0_linux_amd64.tar.gz
+sudo cp kustomize /usr/local/bin/.
+----

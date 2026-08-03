@@ -1,0 +1,34 @@
+= Deploy RHOSO using Validated Patterns.
+
+== Validate the prerequisites
+
+[source,bash,role=execute]
+----
+cd /home/lab-user/rhoso-gitops/
+./pattern.sh make validate-prereq
+./pattern.sh make show
+----
+
+== Launch RHOSO deployement using Validated Patterns
+
+[source,bash,role=execute]
+----
+./pattern.sh make install
+----
+
+== Access the OpenShift Gitops console
+
+Extract the password from the admin user Secret:
+
+[source,bash,role=execute]
+----
+argoPass=$(oc get secret/openshift-gitops-cluster -n openshift-gitops -o jsonpath='{.data.admin\.password}' | base64 -d)
+echo $argoPass
+----
+
+Get the Route for the OpenShift Gitops/OpenShift GitOps server:
+[source,bash,role=execute]
+----
+argoURL=$(oc get route openshift-gitops-server -n openshift-gitops -o jsonpath='{.spec.host}{"\n"}')
+echo $argoURL
+----

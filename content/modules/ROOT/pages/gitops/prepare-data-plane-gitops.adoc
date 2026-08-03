@@ -1,42 +1,14 @@
-= Install RHOSO 18 dataplane
-
-== Login to the preprovisioned Compute and configure networking
-
-From the bastion login to the *compute01* host:
-
-[source,bash,role=execute,subs=attributes]
-----
-ssh -i /home/lab-user/.ssh/{guid}key.pem cloud-user@compute01
-----
-
-[source,bash,role=execute,subs=attributes]
-----
-sudo hostnamectl set-hostname edpm-compute-1.sandbox-{guid}-ocp4-cluster.svc.cluster.local
-sudo nmcli con add con-name "static-eth1" ifname eth1 type ethernet ip4 172.22.0.100/24 ipv4.dns "172.22.0.89"
-sudo nmcli con up "static-eth1"
-sudo nmcli con add type ethernet ifname eth0 con-name eth0-dhcp ipv4.method auto ipv6.method ignore
-sudo nmcli con up eth0-dhcp
-sudo nmcli con mod eth0-dhcp connection.stable-id "user-set"
-----
-
-And log off VM
-
-[source,bash,role=execute]
-----
-logout
-----
-
 == Creating the Dataplane Environment Overlay
 
 === Configuring OpenShift Networking for RHOS
 
 ==== Creating the environment overlay configuration
 
-Change directory to your base forked gitops repo, in your bastion:
+Change directory to your forked gitops repo, in your bastion:
 
 [source,bash,role=execute]
 ----
-cd /home/lab-user/labrepo/content/files/manifests
+cd /home/lab-user/rhoso-gitops/gitops
 ----
 
 Create an environment directory to store the managed cluster overlay configuration:
@@ -80,7 +52,7 @@ vim environments/demo-env/dataplane/kustomization.yaml
 
 And add the patches to add the *compute01* node: 
 
-[source,bash,subs=attributes]
+[source,bash,subs=attributes,role=execute]
 ----
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -171,59 +143,4 @@ Commit the files created and push it to your github repo:
 git add .
 git commit -m "Base and demo-env environment dataplane"
 git push origin
-----
-
-
-== Deploying the data plane overlay using a GitOps Application
-
-Deploy the RHOSO data plane using a GitOps Application which will be deployed using sync-waves, resulting in the automated deployment of the environment on OpenShift.
-
-Create the Application manifest:
-
-[IMPORTANT]
-
-replace `$your_github_id` string with your Github id
-
-[source,bash,role=execute]
-----
-cat > applications/rhoso/application-environment-demo-env-dataplane.yaml <<EOF
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  finalizers:
-  - resources-finalizer.argocd.argoproj.io
-  name: environment-rhoso-demo-env-dataplane
-  namespace: openshift-gitops
-spec:
-  destination:
-    server: https://kubernetes.default.svc
-  project: default
-  source:
-    path: content/files/manifests/environments/demo-env/dataplane/
-    repoURL: https://github.com/$your_github_id/showroom_osp-on-ocp-day2.git
-    targetRevision: HEAD
-  syncPolicy:
-    automated: {}
-EOF
-----
-
-Deploy the RHOSO control plane with the GitOps Application:
-
-[source,bash,role=execute]
-----
-oc create --save-config -f applications/rhoso/application-environment-demo-env-dataplane.yaml
-----
-
-Wait for the Application to deploy successfully:
-
-[source,bash,role=execute]
-----
-oc wait --timeout=600s -nopenshift-gitops applications.argoproj.io/environment-rhoso-demo-env-dataplane --for jsonpath='{.status.health.status}'=Healthy
-----
-
-Wait for the Application to deploy successfully. Type Control + C, to exit the wait command:
-
-[source,bash,role=execute]
-----
-oc get -n openshift-gitops application.argoproj.io environment-rhoso-demo-env-dataplane -w
 ----

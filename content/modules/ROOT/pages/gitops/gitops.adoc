@@ -13,7 +13,8 @@ In this lab, you will cover the following topics:
 
 * xref:prereqs-gitops.adoc[Install the Operators prerequisites using OpenShift gitops]
 * xref:install-operators-gitops.adoc[Install the Red Hat OpenStack Platform Service Operators using OpenShift gitops]
-* xref:secure.adoc[Configure Secure Access for OpenStack Services]
+* xref:prepare-external-secrets-operator.adoc[Install External Secrets Operator (Kubernetes provider)]
+* xref:secure.adoc[Configure Secure Access with Vault and External Secrets]
 * xref:install-nfs-server.adoc[Install NFS server]
 * xref:deploy-control-plane-gitops.adoc[Deploy RHOSO control plane using OpenShift gitops]
 * xref:deploy-data-plane-gitops.adoc[Deploy RHOSO data plane using OpenShift gitops]
@@ -29,7 +30,9 @@ The content presented in this guide is not officially supported by Red Hat. It i
 
 Fork the GitHub repository into your personal GitHub space:
 
-https://github.com/rh-osp-demo/showroom_osp-on-ocp-day2
+https://github.com/validatedpatterns-sandbox/rhoso-gitops
+
+Make sure you uncheck "Copy the main branch only" checkbox.
 
 == Access Your Lab Environment
 
@@ -67,7 +70,7 @@ Copy the public key `~/.ssh/{guid}key.pub` from the bastion to your GitHub accou
 
 1. Copy the SSH public key to your clipboard.
 2. In the forked repository page, click on the *Settings* tab.
-3. In the *Code and automation* section, click *Deploy keys*.
+3. In the *Security and quality* section, click *Deploy keys*.
 4. Click *Add deploy key*.
 5. In the *Title* field, add a descriptive label, such as `"bastion RHOSO gitops key"`.
 6. Click *Add SSH key*.
@@ -91,8 +94,8 @@ In the bastion, clone your forked repository to the bastion using SSH:
 [source,bash]
 ----
 cd
-git clone git@github.com:$your_github_id/showroom_osp-on-ocp-day2.git labrepo
-cd labrepo
+git clone git@github.com:$your_github_id/rhoso-gitops.git rhoso-gitops
+cd rhoso-gitops
 ----
 
 *Be sure to review all commands carefully for both functionality and syntax!*

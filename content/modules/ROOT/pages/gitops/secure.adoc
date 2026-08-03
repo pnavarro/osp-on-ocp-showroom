@@ -1,69 +1,463 @@
-= Providing Secure Access to the Red Hat OpenStack Platform Services
+= Install the External Secrets Operator with the Kubernetes Provider
 
-We will be utilizing a preconfigured yaml file (`files/osp-ng-ctlplane-secret.yaml`) to create a seperate base64 password for heat and one for the remaining services.
+This lab installs the **External Secrets Operator (ESO)** through the RHOSO GitOps
+`operator-dependencies` application and uses the **Kubernetes provider** (no Vault).
 
-Make sure that you are in the *openstack* namespace:
+You do **not** need the final RHOSO secrets in the `openstack` namespace before you
+run the pattern. Separate three layers:
+
+| Layer | What | When |
+| --- | --- | --- |
+| Source secrets | Passwords, SSH keys, NFS config | Create with `oc` in `validated-patterns-secrets` (before or during install) |
+| ESO operator | Subscription / controller | Installed by `operator-dependencies` when the pattern syncs |
+| Projected secrets | `osp-secret`, `libvirt-secret`, … in `openstack` | Created by ESO after ExternalSecrets sync |
+
+Argo CD starts the child applications together; they **retry** until ESO, the
+`openstack` namespace, and the source secrets are available.
+
+[NOTE]
+The `openstack` namespace is already created by Validated Patterns
+(`clusterGroup.namespaces` in `values-standalone.yaml`).
+Your secrets overlay only needs store wiring and `ExternalSecret` resources
+with `metadata.namespace: openstack` — not a `kind: Namespace` manifest.
+
+[NOTE]
+This pattern (`rhoso-gitops`) does not ship a `secrets-backend-kubernetes` Make
+target. Install ESO via `operator-dependencies` as shown below.
+Do not also enable the Vault flow from xref:secure.adoc[Configure Secure Access with Vault and External Secrets] on the same cluster.
+
+== Lab flow
+
+```
+1. Edit overrides: add ESO to operator-dependencies; enable openstack-secrets
+2. Commit ExternalSecret + ClusterSecretStore overlay to Git
+3. oc create source secrets in validated-patterns-secrets   (no ESO required)
+4. ./pattern.sh make install  (or let Argo sync)
+5. Argo retries until ESO projects Secrets into openstack
+```
+
+```
+oc create secret  -->  validated-patterns-secrets
+                              |
+operator-dependencies  -->  ESO (Kubernetes provider / ClusterSecretStore)
+                              |
+openstack-secrets      -->  ExternalSecret CRs
+                              |
+                              v
+                     Secrets in namespace openstack
+```
+
+The RHOSO secrets this lab must project:
+
+| Kubernetes Secret | Purpose |
+| --- | --- |
+| `osp-secret` | Control plane service passwords |
+| `libvirt-secret` | Libvirt password |
+| `cinder-nfs-config` | NFS backend config for Cinder |
+| `subscription-manager` | RHEL subscription (`rhc_auth`) |
+| `redhat-registry` | `registry.redhat.io` credentials |
+| `dataplane-ansible-ssh-private-key-secret` | Ansible SSH to data plane nodes |
+| `nova-migration-ssh-key` | Nova live-migration SSH key pair |
+
+== 1. Add ESO to `operator-dependencies`
+
+On the bastion, in your forked pattern repository:
 
 [source,bash,role=execute]
 ----
-oc project openstack
+cd /home/lab-user/rhoso-gitops
 ----
 
-Create the osp-secret Secret:
+Edit `overrides/values-rhoso-gitops.yaml` so `operator-dependencies` includes the
+community ESO component (and Argo annotations for CRD dry-run behaviour).
+
+Replace the existing `operator-dependencies` block with:
+
+[source,yaml]
+----
+  operator-dependencies:
+    enabled: true
+    repoURL: https://github.com/openstack-k8s-operators/gitops
+    path: example/dependencies
+    targetRevision: v0.3.1
+    kustomize:
+      components:
+        - "https://github.com/openstack-k8s-operators/gitops/components/secrets/external-secrets-operator/redhat?ref=v0.3.1"
+        - "https://github.com/openstack-k8s-operators/gitops/components/argocd/hooks/postDelete/deploy-operators?ref=v0.3.1"
+        - "https://github.com/openstack-k8s-operators/gitops/components/dependencies/provisioning-config?ref=v0.3.1"
+        - "https://github.com/openstack-k8s-operators/gitops/components/argocd/annotations?ref=v0.3.1"
+    syncPolicy:
+      automated: {}
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
+      syncOptions:
+        - Prune=true
+        - SkipDryRunOnMissingResource=true
+----
+
+[WARNING]
+Install either the community ESO component **or** the Red Hat ESO overlay, not both.
+Do not install ESO a second time out of band if you use this component.
+
+== 2. Create the `openstack-secrets` Git overlay
+
+Create store wiring and ExternalSecrets in Git.
+Argo applies them after ESO CRDs exist (retries handle the wait).
+
+[source,bash,role=execute]
+----
+cd /home/lab-user/rhoso-gitops
+mkdir -p gitops/environments/demo-env/secrets
+----
+
+=== Kustomization
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/kustomization.yaml <<EOF
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - bootstrap-rbac.yaml
+  - clustersecretstore.yaml
+  - externalsecret-osp-secret.yaml
+  - externalsecret-libvirt-secret.yaml
+  - externalsecret-cinder-nfs-config.yaml
+  - externalsecret-subscription-manager.yaml
+  - externalsecret-redhat-registry.yaml
+  - externalsecret-dataplane-ansible-ssh.yaml
+  - externalsecret-nova-migration-ssh-key.yaml
+EOF
+----
+
+=== Bootstrap RBAC (read source secrets)
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/bootstrap-rbac.yaml <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso-kubernetes-store
+  namespace: validated-patterns-secrets
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: eso-kubernetes-store-role
+  namespace: validated-patterns-secrets
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectrulesreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: eso-kubernetes-store-rolebinding
+  namespace: validated-patterns-secrets
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: eso-kubernetes-store-role
+subjects:
+  - kind: ServiceAccount
+    name: eso-kubernetes-store
+    namespace: validated-patterns-secrets
+EOF
+----
+
+=== ClusterSecretStore (Kubernetes provider)
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/clustersecretstore.yaml <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: kubernetes-secretstore
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: validated-patterns-secrets
+      server:
+        url: https://kubernetes.default.svc
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          namespace: openstack
+          key: ca.crt
+      auth:
+        serviceAccount:
+          name: eso-kubernetes-store
+          namespace: validated-patterns-secrets
+EOF
+----
+
+[NOTE]
+`caProvider.namespace: openstack` uses the cluster CA ConfigMap that appears when
+the `openstack` namespace exists. Until then, Argo retries the secrets application.
+If the store stays Not Ready, check `oc get configmap kube-root-ca.crt -n openstack`.
+
+=== ExternalSecret manifests
+
+With the Kubernetes provider, `dataFrom.extract.key` is the **name of the source
+Secret** in `validated-patterns-secrets` (not a Vault path).
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/externalsecret-osp-secret.yaml <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: osp-secret
+  namespace: openstack
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: kubernetes-secretstore
+    kind: ClusterSecretStore
+  target:
+    name: osp-secret
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: osp-secret
+EOF
+----
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/externalsecret-libvirt-secret.yaml <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: libvirt-secret
+  namespace: openstack
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: kubernetes-secretstore
+    kind: ClusterSecretStore
+  target:
+    name: libvirt-secret
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: libvirt-secret
+EOF
+----
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/externalsecret-cinder-nfs-config.yaml <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: cinder-nfs-config
+  namespace: openstack
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: kubernetes-secretstore
+    kind: ClusterSecretStore
+  target:
+    name: cinder-nfs-config
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: cinder-nfs-config
+EOF
+----
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/externalsecret-subscription-manager.yaml <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: subscription-manager
+  namespace: openstack
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: kubernetes-secretstore
+    kind: ClusterSecretStore
+  target:
+    name: subscription-manager
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: subscription-manager
+EOF
+----
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/externalsecret-redhat-registry.yaml <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: redhat-registry
+  namespace: openstack
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: kubernetes-secretstore
+    kind: ClusterSecretStore
+  target:
+    name: redhat-registry
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: redhat-registry
+EOF
+----
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/externalsecret-dataplane-ansible-ssh.yaml <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: dataplane-ansible-ssh-private-key-secret
+  namespace: openstack
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: kubernetes-secretstore
+    kind: ClusterSecretStore
+  target:
+    name: dataplane-ansible-ssh-private-key-secret
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: dataplane-ansible-ssh-private-key-secret
+EOF
+----
+
+[source,bash,role=execute]
+----
+cat > gitops/environments/demo-env/secrets/externalsecret-nova-migration-ssh-key.yaml <<EOF
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: nova-migration-ssh-key
+  namespace: openstack
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: kubernetes-secretstore
+    kind: ClusterSecretStore
+  target:
+    name: nova-migration-ssh-key
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: nova-migration-ssh-key
+EOF
+----
+
+Validate the overlay:
+
+[source,bash,role=execute]
+----
+cd /home/lab-user/rhoso-gitops
+oc kustomize gitops/environments/demo-env/secrets
+----
+
+Commit and push the Git changes (still **without** secret values):
+
+[source,bash,role=execute]
+----
+cd /home/lab-user/rhoso-gitops
+git add overrides/values-rhoso-gitops.yaml environments/demo-env/secrets
+git commit -m "Add ESO via operator-dependencies and openstack-secrets overlay"
+git push origin main
+----
+
+== 4. Create source secrets with `oc` (before or during install)
+
+These secrets live only in the cluster bootstrap namespace.
+ESO is **not** required for this step.
+
+[source,bash,role=execute]
+----
+oc create namespace validated-patterns-secrets --dry-run=client -o yaml | oc apply -f -
+----
+
+=== Control plane and libvirt (lab demo passwords)
+
+Reuse the lab files, but place them in `validated-patterns-secrets`:
 
 [source,bash,role=execute]
 ----
 cd /home/lab-user/labrepo/content/files
-oc create -f osp-ng-ctlplane-secret.yaml
+sed 's/namespace: openstack/namespace: validated-patterns-secrets/' \
+  osp-ng-ctlplane-secret.yaml | oc apply -f -
+sed 's/namespace: openstack/namespace: validated-patterns-secrets/' \
+  osp-ng-libvirt-secret.yaml | oc apply -f -
 ----
 
-Create the libvirt Secret:
+=== Cinder NFS config
 
 [source,bash,role=execute]
 ----
-oc create -f osp-ng-libvirt-secret.yaml
+cd /home/lab-user/labrepo/content/files
+oc create secret generic cinder-nfs-config \
+  -n validated-patterns-secrets \
+  --from-file=nfs-cinder-conf \
+  --dry-run=client -o yaml | oc apply -f -
 ----
 
-== Prepare the secret to place the NFS server connection used by Cinder
-
-[source,bash,role=execute]
-----
-oc create secret generic cinder-nfs-config --from-file=nfs-cinder-conf
-----
-
-== Create secret for the subcription manager credentials
-
-Create a secret for the subscription manager:
+=== Subscription and registry
 
 [IMPORTANT]
-
-Add your username and password
+Replace the placeholders with your Red Hat credentials.
 
 [source,bash,role=execute]
 ----
 oc create secret generic subscription-manager \
---from-literal rhc_auth='{"login": {"username": "your_username", "password": "your_password"}}'
-EOF
+  -n validated-patterns-secrets \
+  --from-literal=rhc_auth='{"login": {"username": "your_username", "password": "your_password"}}' \
+  --dry-run=client -o yaml | oc apply -f -
+
+oc create secret generic redhat-registry \
+  -n validated-patterns-secrets \
+  --from-literal=edpm_container_registry_logins='{"registry.redhat.io": {"<username>": "<password>"}}' \
+  --dry-run=client -o yaml | oc apply -f -
 ----
 
-Create a secret for the Red Hat registry:
-
-[IMPORTANT]
-
-Add your username and password
-
-[source,bash,role=execute]
-----
-oc create secret generic redhat-registry --from-literal edpm_container_registry_logins='{"registry.redhat.io": {"<username>": "<password>"}}' -n openstack
-----
-
-== Configure the ansible dataplane secrets to access
-
-From the bastion server, create Secret for ansible connection and nova migration of virtual machines
+=== Data plane SSH keys
 
 [source,bash,role=execute,subs=attributes]
 ----
-oc create secret generic dataplane-ansible-ssh-private-key-secret --save-config --dry-run=client --from-file=authorized_keys=/home/lab-user/.ssh/{guid}key.pub --from-file=ssh-privatekey=/home/lab-user/.ssh/{guid}key.pem --from-file=ssh-publickey=/home/lab-user/.ssh/{guid}key.pub -n openstack -o yaml | oc apply -f-
+oc create secret generic dataplane-ansible-ssh-private-key-secret \
+  -n validated-patterns-secrets \
+  --from-file=authorized_keys=/home/lab-user/.ssh/{guid}key.pub \
+  --from-file=ssh-privatekey=/home/lab-user/.ssh/{guid}key.pem \
+  --from-file=ssh-publickey=/home/lab-user/.ssh/{guid}key.pub \
+  --dry-run=client -o yaml | oc apply -f -
+
+cd /home/lab-user/rhoso-gitops
 ssh-keygen -f ./id -t ecdsa-sha2-nistp521 -N ''
-oc create secret generic nova-migration-ssh-key --from-file=ssh-privatekey=id --from-file=ssh-publickey=id.pub -n openstack -o yaml | oc apply -f-
+oc create secret generic nova-migration-ssh-key \
+  -n validated-patterns-secrets \
+  --from-file=ssh-privatekey=id \
+  --from-file=ssh-publickey=id.pub \
+  --dry-run=client -o yaml | oc apply -f -
+----
+
+Confirm source secrets:
+
+[source,bash,role=execute]
+----
+oc get secret -n validated-patterns-secrets
 ----
