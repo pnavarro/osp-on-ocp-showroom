@@ -1,0 +1,77 @@
+# Nova cells (message bus + noVNC) and OVN controller NIC mapping for the lab.
+apiVersion: core.openstack.org/v1beta1
+kind: OpenStackControlPlane
+metadata:
+  name: openstack-control-plane
+spec:
+  nova:
+    $patch: replace
+    apiOverride:
+      route: {}
+    template:
+      apiServiceTemplate:
+        override:
+          service:
+            internal:
+              metadata:
+                annotations:
+                  metallb.universe.tf/address-pool: internalapi
+                  metallb.universe.tf/allow-shared-ip: internalapi
+                  metallb.universe.tf/loadBalancerIPs: 172.17.0.89
+              spec:
+                type: LoadBalancer
+      metadataServiceTemplate:
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/allow-shared-ip: internalapi
+                metallb.universe.tf/loadBalancerIPs: 172.17.0.89
+            spec:
+              type: LoadBalancer
+      schedulerServiceTemplate:
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/allow-shared-ip: internalapi
+                metallb.universe.tf/loadBalancerIPs: 172.17.0.89
+            spec:
+              type: LoadBalancer
+      cellTemplates:
+        cell0:
+          cellDatabaseAccount: nova-cell0
+          cellDatabaseInstance: openstack
+          cellMessageBusInstance: rabbitmq
+          hasAPIAccess: true
+        cell1:
+          cellDatabaseAccount: nova-cell1
+          cellDatabaseInstance: openstack-cell1
+          cellMessageBusInstance: rabbitmq-cell1
+          noVNCProxyServiceTemplate:
+            enabled: true
+            networkAttachments:
+            - internalapi
+            - ctlplane
+          hasAPIAccess: true
+      secret: osp-secret
+  ovn:
+    $patch: replace
+    template:
+      ovnDBCluster:
+        ovndbcluster-nb:
+          dbType: NB
+          networkAttachment: internalapi
+          storageRequest: 10G
+          replicas: 1
+        ovndbcluster-sb:
+          dbType: SB
+          networkAttachment: internalapi
+          storageRequest: 10G
+          replicas: 1
+      ovnController:
+        networkAttachment: tenant
+        nicMappings:
+         datacentre: enp7s0
