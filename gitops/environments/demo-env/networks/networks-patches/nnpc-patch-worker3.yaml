@@ -1,0 +1,9 @@
+- op: replace
+  path: /metadata/name
+  value: "control-plane-cluster-48lms-3"
+- op: replace
+  path: /spec/nodeSelector/kubernetes.io~1hostname
+  value: "control-plane-cluster-48lms-3"
+- op: replace
+  path: /spec/desiredState/interfaces/3/ipv4/address/0/ip
+  value: "192.168.18.210"

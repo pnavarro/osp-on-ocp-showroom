@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+transformers:
+  - |-
+    apiVersion: builtin
+    kind: NamespaceTransformer
+    metadata:
+      name: notImportantHere
+      namespace: openstack
+    unsetOnly: true
+resources:
+  - ../../../../base/networks
+patches:
+  - path: nnpc-patch-worker1.yaml
+    target:
+      group: nmstate.io
+      version: v1
+      kind: NodeNetworkConfigurationPolicy
+      name: osp-multi-nic-worker-ocp4-worker1
+  - path: nnpc-patch-worker2.yaml
+    target:
+      group: nmstate.io
+      version: v1
+      kind: NodeNetworkConfigurationPolicy
+      name: osp-multi-nic-worker-ocp4-worker2
+  - path: nnpc-patch-worker3.yaml
+    target:
+      group: nmstate.io
+      version: v1
+      kind: NodeNetworkConfigurationPolicy
+      name: osp-multi-nic-worker-ocp4-worker3
+  - path: netconfig-patch.yaml
+    target:
+      group: nmstate.io
+      version: v1
+      kind: NetConfig
+      name: openstacknetconfig
