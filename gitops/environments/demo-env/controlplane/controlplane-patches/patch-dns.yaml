@@ -1,0 +1,23 @@
+# DNS for the lab: ctlplane MetalLB VIP and cluster DNS resolver.
+apiVersion: core.openstack.org/v1beta1
+kind: OpenStackControlPlane
+metadata:
+  name: openstack-control-plane
+spec:
+  dns:
+    $patch: replace
+    template:
+      override:
+        service:
+          metadata:
+            annotations:
+              metallb.universe.tf/address-pool: ctlplane
+              metallb.universe.tf/allow-shared-ip: ctlplane
+              metallb.universe.tf/loadBalancerIPs: 172.22.0.89
+          spec:
+            type: LoadBalancer
+      options:
+      - key: server
+        values:
+        - 172.30.0.10
+      replicas: 1
