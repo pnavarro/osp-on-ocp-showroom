@@ -1,0 +1,15 @@
+- op: replace
+  path: /spec/networks/0/dnsDomain
+  value: ctlplane.sandbox-gd5n9-ocp4-cluster.svc.cluster.local
+- op: replace
+  path: /spec/networks/1/dnsDomain
+  value: internalapi.sandbox-gd5n9-ocp4-cluster.svc.cluster.local
+- op: replace
+  path: /spec/networks/2/dnsDomain
+  value: tenant.sandbox-gd5n9-ocp4-cluster.svc.cluster.local
+- op: replace
+  path: /spec/networks/3/dnsDomain
+  value: storage.sandbox-gd5n9-ocp4-cluster.svc.cluster.local
+- op: replace
+  path: /spec/networks/4/dnsDomain
+  value: external.sandbox-gd5n9-ocp4-cluster.svc.cluster.local
